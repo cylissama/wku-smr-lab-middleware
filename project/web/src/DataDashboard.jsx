@@ -13,6 +13,7 @@ import { sendDashboardMessage } from "./api/messageApi";
 
 const ROBOT_CAMERA_URL = import.meta.env.VITE_ROBOT_CAMERA_URL;
 const DB_GUI_URL = import.meta.env.VITE_DB_GUI_URL;
+const PORTAINER_URL = import.meta.env.VITE_PORTAINER_URL;
 
 function getErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -242,6 +243,15 @@ export default function DataDashboard() {
                                     disabled={!DB_GUI_URL}
                                 >
                                     Open Database GUI
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="rounded-md bg-purple-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                                    onClick={() => window.open(PORTAINER_URL, "_blank")}
+                                    disabled={!PORTAINER_URL}
+                                >
+                                    Open Portainer
                                 </button>
                             </div>
                         </div>

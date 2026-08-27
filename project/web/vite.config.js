@@ -49,6 +49,9 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_DB_GUI_URL": JSON.stringify(
         env.VITE_DB_GUI_URL || env.DB_GUI_URL || "",
       ),
+      "import.meta.env.VITE_PORTAINER_URL": JSON.stringify(
+        env.VITE_PORTAINER_URL || env.PORTAINER_URL || "",
+      ),
     },
   };
 });
