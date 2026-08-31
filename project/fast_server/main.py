@@ -35,7 +35,7 @@ def build_allowed_origins() -> list[str]:
 
 # MQTT Config Setup
 mqtt_config = MQTTConfig(
-    host="host.docker.internal",
+    host=os.getenv("MQTT_HOST", "mqtt-broker"),
     port=int(os.getenv("MQTT_PORT", 1883)),
     keepalive=60,
 )

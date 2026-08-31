@@ -1,5 +1,6 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
+
 ARG HOST_IP
 ARG FASTAPI_PORT
 ARG VITE_API_URL
@@ -10,6 +11,7 @@ ARG VITE_ROBOT_CAMERA_URL
 ARG VITE_DB_GUI_URL
 ARG ROBOT_CAMERA_URL
 ARG DB_GUI_URL
+
 ENV HOST_IP=$HOST_IP
 ENV FASTAPI_PORT=$FASTAPI_PORT
 ENV VITE_API_URL=$VITE_API_URL
@@ -20,11 +22,14 @@ ENV VITE_ROBOT_CAMERA_URL=$VITE_ROBOT_CAMERA_URL
 ENV VITE_DB_GUI_URL=$VITE_DB_GUI_URL
 ENV ROBOT_CAMERA_URL=$ROBOT_CAMERA_URL
 ENV DB_GUI_URL=$DB_GUI_URL
+
 COPY package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
+RUN npm run docs:build
 
 FROM nginx:alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/docs/.vitepress/dist /usr/share/nginx/html/docs
