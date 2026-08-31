@@ -3,27 +3,59 @@ import { defineConfig } from 'vitepress'
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   base: '/docs/',
-  title: "Documentation",
-  description: "SOP files",
+  title: "SMR Documentation",
+  description: "Documentation for the WKU Smart Manufacturing Research data broker middleware",
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
-      { text: 'Examples', link: '/markdown-examples' }
+      { text: 'Overview', link: '/overview/what-is-this' },
+      { text: 'Hardware', link: '/hardware/' },
+      { text: 'Data', link: '/data/database-uses' },
+      { text: 'Docker', link: '/docker/compose' },
+      { text: 'Network', link: '/network/topology' },
     ],
 
     sidebar: [
       {
-        text: 'Examples',
+        text: 'Overview',
         items: [
-          { text: 'Markdown Examples', link: '/markdown-examples' },
-          { text: 'Runtime API Examples', link: '/api-examples' }
-        ]
-      }
+          { text: 'What is this project?', link: '/overview/what-is-this' },
+          { text: 'How is this structured?', link: '/overview/structure' },
+        ],
+      },
+      {
+        text: 'Hardware',
+        items: [
+          { text: 'The hardware behind the project', link: '/hardware/' },
+        ],
+      },
+      {
+        text: 'Data',
+        items: [
+          { text: 'Database uses', link: '/data/database-uses' },
+          { text: 'Database structure', link: '/data/database-structure' },
+        ],
+      },
+      {
+        text: 'Docker',
+        items: [
+          { text: 'Compose', link: '/docker/compose' },
+          { text: 'Swarm', link: '/docker/swarm' },
+          { text: 'Automations', link: '/docker/automations' },
+        ],
+      },
+      {
+        text: 'Network',
+        items: [
+          { text: 'Topology', link: '/network/topology' },
+        ],
+      },
     ],
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/vuejs/vitepress' }
-    ]
-  }
+      { icon: 'github', link: 'https://github.com/cylissama/wku-smr-lab-middleware' },
+      { icon: 'github', link: 'https://github.com/Mseavers1/CS560-Smart-Manufacturing-Data' },
+    ],
+  },
 })

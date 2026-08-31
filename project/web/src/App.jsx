@@ -19,6 +19,20 @@ function App() {
           <h2 className="text-lg font-semibold tracking-wide">Smart Manufacturing Research</h2>
 
           <div className="flex items-center gap-4">
+
+            <button
+              className={`flex items-center gap-1 rounded px-3 py-2 transition ${
+                isInfoActive
+                  ? "bg-white text-slate-900"
+                  : "bg-cyan-600 text-white hover:bg-cyan-500"
+              }`}
+              onClick={() => {
+                nav("/docs/");
+              }}
+            >
+              Documentation
+            </button>
+
             <button
               className={`flex items-center gap-1 rounded px-3 py-2 transition ${
                 isInfoActive
