@@ -14,6 +14,7 @@ export default defineConfig({
       { text: 'Data', link: '/data/database-uses' },
       { text: 'Docker', link: '/docker/compose' },
       { text: 'Network', link: '/network/topology' },
+      { text: 'Expanding', link: '/expanding/' },
     ],
 
     sidebar: [
@@ -28,6 +29,10 @@ export default defineConfig({
         text: 'Hardware',
         items: [
           { text: 'The hardware behind the project', link: '/hardware/' },
+          { text: 'Data Broker Mini PC', link: '/hardware/data-broker-mini-pc' },
+          { text: 'IMU Nodes', link: '/hardware/imu' },
+          { text: 'Camera Nodes', link: '/hardware/camera' },
+          { text: 'Robot Arm', link: '/hardware/robot-arm' },
         ],
       },
       {
@@ -49,6 +54,13 @@ export default defineConfig({
         text: 'Network',
         items: [
           { text: 'Topology', link: '/network/topology' },
+        ],
+      },
+      {
+        text: 'Expanding',
+        items: [
+          { text: 'Expanding the system', link: '/expanding/' },
+          { text: 'Bringing a node online', link: '/expanding/swarm-nodes' },
         ],
       },
     ],

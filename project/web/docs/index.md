@@ -33,4 +33,7 @@ features:
   - title: Network
     details: Hosts, IP addresses, and ports across the lab network.
     link: /network/topology
+  - title: Expanding
+    details: How to bring a new node or service online.
+    link: /expanding/
 ---
