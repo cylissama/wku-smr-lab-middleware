@@ -1,6 +1,13 @@
 # Swarm
 
-`project/swarm.yml` deploys the **IMU edge nodes** — separately from the `docker-compose.yml` broker stack described in [Compose](/docker/compose). Where Compose runs on one host, this stack runs one service per IMU, each pinned to a specific Raspberry Pi across a Docker Swarm cluster.
+[Docker Swarm Mode](https://docs.docker.com/engine/swarm/) is being used in the development of this project to improve the efficiency of the session tests. Swarm works with the existing containers to deploy conatiners over network.
+
+`project/swarm.yml` currently only deploys the **IMU edge nodes** — separately from the `docker-compose.yml` broker stack described in [Compose](/docker/compose). Where Compose runs on one host, this stack runs one service per IMU, each pinned to a specific Raspberry Pi across a Docker Swarm cluster.
+
+
+## Overview of Operation
+
+Swarm works by creating a Manager node(s) and then adding Worker nodes to that manager to deploy on command. 
 
 ## Why Swarm, and why it's split from Compose
 

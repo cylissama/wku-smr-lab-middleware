@@ -1,12 +1,12 @@
 # What is this project?
 
-The **SMR data broker middleware** is a smart manufacturing data platform for collecting, monitoring, and storing telemetry from distributed edge devices — IMUs, cameras, and a robot arm — in the WKU Smart Manufacturing Research (SMR) Lab. It originated as the *CS560 Smart Manufacturing Data* project.
+The **SMR data broker middleware** is a data platform for collecting, monitoring, and storing telemetry (data) from distributed edge devices — IMUs, cameras, and a robot arm — in the WKU Smart Manufacturing Research (SMR) Lab. 
 
 The system centers on a containerized data broker: it receives data from edge devices over MQTT and TCP, stores it in a session-scoped PostgreSQL database, and exposes a live web dashboard for monitoring sessions, device activity, and backups.
 
 ## What it does
 
-- **Real-time telemetry ingestion** — IMU and camera devices publish over MQTT; the robot streams over a raw TCP connection.
+- **Real-time data ingestion** — IMU and camera devices publish over MQTT; the robot streams over a raw TCP connection.
 - **Session-based data collection** — every reading is tied to an operator-started "session," so a single test run can be queried, exported, and reasoned about as one unit.
 - **Live dashboard monitoring** — a React web UI shows device connection status, session state, and live log/message streams over WebSockets.
 - **Database backup and restore** — every session automatically triggers a `pg_dump` backup, and backups can be listed and restored from the dashboard.

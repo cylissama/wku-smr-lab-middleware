@@ -1,6 +1,11 @@
 # Compose
 
+[Docker Compose](https://docs.docker.com/compose/) is used to orchestrate (deploy) this entire project. We create containers for each service, such as the fast-api application, or the mqtt broker, then we 'spin' those containers up to run our services.
+
+
 `project/docker-compose.yml` defines the always-on broker stack. It runs on a single host — the Data Broker Mini PC — and is brought up with a plain `docker compose up -d` from `project/`.
+
+We plan to switch all orchestration to Docker Swarm in the future.
 
 ## Services
 
@@ -16,6 +21,7 @@ Everything is driven by a single `.env` file in `project/` — database credenti
 
 ### `mqtt-broker`
 
+The mqtt-broker is hosted on the local port of the data broker machine, so the IP will stay the same. That IP is currently 192.168.2.100.
 Exposes `MQTT_PORT` (device messaging, default `1883`) and `9001` (MQTT-over-WebSocket). Configuration is a bind-mounted directory rather than baked into the image, so broker settings can change without a rebuild.
 
 ### `fastapi-app`
