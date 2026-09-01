@@ -27,7 +27,7 @@ function App() {
                   : "bg-cyan-600 text-white hover:bg-cyan-500"
               }`}
               onClick={() => {
-                nav("/docs/");
+                window.location.href = "/docs/";
               }}
             >
               Documentation
