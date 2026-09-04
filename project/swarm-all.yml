@@ -1,0 +1,135 @@
+services:
+  imu-109:
+    image: smart-mfg-imu:latest
+    deploy:
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ4
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "109"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_REQUEST_TARE: "true"
+      IMU_SAMPLE_HZ: "100"
+      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_PORT: "1883"
+      MQTT_TOPIC: imu/data
+      IMU_CSV_PATH: /app/data/imu-edge.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health.json
+
+  imu-110:
+    image: smart-mfg-imu:latest
+    deploy:
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ5
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "110"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_REQUEST_TARE: "true"
+      IMU_SAMPLE_HZ: "100"
+      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_PORT: "1883"
+      MQTT_TOPIC: imu/data
+      IMU_CSV_PATH: /app/data/imu-edge.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health.json
+
+
+
+  imu-108:
+    image: smart-mfg-imu:latest
+    deploy:
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ3
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "108"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_REQUEST_TARE: "true"
+      IMU_SAMPLE_HZ: "100"
+      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_PORT: "1883"
+      MQTT_TOPIC: imu/data
+      IMU_CSV_PATH: /app/data/imu-edge.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health.json
+
+
+  imu-107:
+    image: smart-mfg-imu:latest
+    deploy:
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ2
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "107"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_REQUEST_TARE: "true"
+      IMU_SAMPLE_HZ: "100"
+      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_PORT: "1883"
+      MQTT_TOPIC: imu/data
+      IMU_CSV_PATH: /app/data/imu-edge.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health.json
+
+
+
+  imu-106:
+    image: smart-mfg-imu:latest
+    deploy:
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ1
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "106"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_REQUEST_TARE: "true"
+      IMU_SAMPLE_HZ: "100"
+      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_PORT: "1883"
+      MQTT_TOPIC: imu/data
+      IMU_CSV_PATH: /app/data/imu-edge.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health.json
