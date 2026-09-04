@@ -19,7 +19,7 @@ services:
       IMU_SOCKET_PATH: /run/imu-hw/imu.sock
       IMU_REQUEST_TARE: "true"
       IMU_SAMPLE_HZ: "100"
-      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_IP: 192.168.2.100
       MQTT_BROKER_PORT: "1883"
       MQTT_TOPIC: imu/data
       IMU_CSV_PATH: /app/data/imu-edge.csv
@@ -45,7 +45,7 @@ services:
       IMU_SOCKET_PATH: /run/imu-hw/imu.sock
       IMU_REQUEST_TARE: "true"
       IMU_SAMPLE_HZ: "100"
-      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_IP: 192.168.2.100
       MQTT_BROKER_PORT: "1883"
       MQTT_TOPIC: imu/data
       IMU_CSV_PATH: /app/data/imu-edge.csv
@@ -73,7 +73,7 @@ services:
       IMU_SOCKET_PATH: /run/imu-hw/imu.sock
       IMU_REQUEST_TARE: "true"
       IMU_SAMPLE_HZ: "100"
-      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_IP: 192.168.2.100
       MQTT_BROKER_PORT: "1883"
       MQTT_TOPIC: imu/data
       IMU_CSV_PATH: /app/data/imu-edge.csv
@@ -100,7 +100,7 @@ services:
       IMU_SOCKET_PATH: /run/imu-hw/imu.sock
       IMU_REQUEST_TARE: "true"
       IMU_SAMPLE_HZ: "100"
-      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_IP: 192.168.2.100
       MQTT_BROKER_PORT: "1883"
       MQTT_TOPIC: imu/data
       IMU_CSV_PATH: /app/data/imu-edge.csv
@@ -128,7 +128,7 @@ services:
       IMU_SOCKET_PATH: /run/imu-hw/imu.sock
       IMU_REQUEST_TARE: "true"
       IMU_SAMPLE_HZ: "100"
-      MQTT_BROKER_IP: 192.168.4.216
+      MQTT_BROKER_IP: 192.168.2.100
       MQTT_BROKER_PORT: "1883"
       MQTT_TOPIC: imu/data
       IMU_CSV_PATH: /app/data/imu-edge.csv
