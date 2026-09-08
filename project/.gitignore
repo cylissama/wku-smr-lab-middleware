@@ -1,0 +1,6 @@
+
+# Environment variables
+.env
+
+# VitePress cache
+web/docs/.vitepress/cache/
