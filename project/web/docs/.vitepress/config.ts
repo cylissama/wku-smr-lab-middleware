@@ -67,7 +67,6 @@ export default defineConfig({
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/cylissama/wku-smr-lab-middleware' },
-      { icon: 'github', link: 'https://github.com/Mseavers1/CS560-Smart-Manufacturing-Data' },
     ],
   },
 })
