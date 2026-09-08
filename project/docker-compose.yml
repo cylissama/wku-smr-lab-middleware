@@ -53,8 +53,10 @@ services:
           VITE_TWINS_URL: ${VITE_TWINS_URL:-}
           VITE_ROBOT_CAMERA_URL: ${VITE_ROBOT_CAMERA_URL:-}
           VITE_DB_GUI_URL: ${VITE_DB_GUI_URL:-}
+          VITE_PORTAINER_URL: ${VITE_PORTAINER_URL:-}
           ROBOT_CAMERA_URL: ${ROBOT_CAMERA_URL:-}
           DB_GUI_URL: ${DB_GUI_URL:-}
+          PORTAINER_URL: ${PORTAINER_URL:-}
       container_name: web-frontend
       ports:
         - "${WEB_PORT}:80"

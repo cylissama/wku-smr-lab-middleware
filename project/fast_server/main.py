@@ -68,8 +68,8 @@ async def try_backup() -> dict[str, Any]:
 
     try:
         db = app.state.db
-        backup_path = db.create_backup()
-
+        # backup_path = db.create_backup()
+        backup_path = await db.create_backup()
         await broadcast_message(misc_manager, "DB Backup Completed")
 
         return {

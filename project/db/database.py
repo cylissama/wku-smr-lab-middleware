@@ -187,8 +187,33 @@ class DatabaseSingleton:
             except Exception as e:
                 await broadcast_message(misc_manager, f"DB Pool connection failed: {e}", "error")
 
-    # Creates a backup
-    def create_backup(self):
+    #Creates a backup
+    # def create_backup(self):
+
+    #     # Ensure folder is mounted to docker
+    #     backup_dir = Path("/db_backups")
+    #     backup_dir.mkdir(parents=True, exist_ok=True)
+
+    #     ts = datetime.fromtimestamp(self.get_time(), tz=timezone.utc).strftime("%Y%m%d_%H%M%S_UTC")
+    #     db = os.environ["PGDATABASE"]
+    #     out = backup_dir / f"{db}_{ts}.dump"
+
+    #     # Batch command to create a backup
+    #     cmd = [
+    #         "pg_dump",
+    #         "-h", os.environ.get("PGHOST", "database"),
+    #         "-p", os.environ.get("PGPORT", "5432"),
+    #         "-U", os.environ["PGUSER"],
+    #         "-d", db,
+    #         "-F", "c",
+    #         "-f", str(out),
+    #     ]
+
+    #     env = {**os.environ, "PGPASSWORD": os.environ["PGPASSWORD"]}
+    #     subprocess.run(cmd, check=True, env=env)
+    #     return str(out)
+    
+    async def create_backup(self):
 
         # Ensure folder is mounted to docker
         backup_dir = Path("/db_backups")

@@ -1,6 +1,178 @@
 version: "3.9"
 
 services:
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    configs:
+      - source: mosquitto_config
+        target: /mosquitto/config/mosquitto.conf
+    ports:
+      - target: 1883
+        published: ${MQTT_PORT:-1883}
+        protocol: tcp
+        mode: host
+    networks:
+      - smr_app
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  fastapi-app:
+    image: ${SMR_FASTAPI_IMAGE}
+    env_file:
+      - .env
+    environment:
+      MQTT_HOST: mqtt-broker
+      NTP_SERVER: ntp
+      HOST_IP: ${HOST_IP}
+      WEB_PORT: ${WEB_PORT}
+      FASTAPI_PORT: ${FASTAPI_PORT}
+      PGHOST: ${DB_HOST}
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_NAME}
+      QUEUE_SIZE: ${QUEUE_SIZE}
+      B_TIMEOUT: ${B_TIMEOUT}
+      BATCHES: ${BATCHES}
+      MQTT_PORT: ${MQTT_PORT}
+      ROBOT_TCP_PORT: ${ROBOT_TCP_PORT}
+      PGPORT: ${PGPORT}
+    ports:
+      - target: 8000
+        published: ${FASTAPI_PORT:-8000}
+        protocol: tcp
+        mode: host
+    volumes:
+      - nas_backups:/db_backups
+      - logs:/fast_server/logs
+    networks:
+      - smr_app
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  web:
+    image: ${SMR_WEB_IMAGE}
+    ports:
+      - target: 80
+        published: ${WEB_PORT:-80}
+        protocol: tcp
+        mode: host
+    networks:
+      - smr_app
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  tcp:
+    image: ${SMR_TCP_IMAGE}
+    env_file:
+      - .env
+    environment:
+      FASTAPI_HOST: fastapi-app
+      FASTAPI_PORT: ${FASTAPI_PORT}
+      PGHOST: ${DB_HOST}
+      NTP_SERVER: ntp
+      PGPORT: ${PGPORT}
+      PGUSER: ${DB_USER}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: ${DB_NAME}
+      BATCHES: ${BATCHES}
+      B_TIMEOUT: ${B_TIMEOUT}
+      QUEUE_SIZE: ${QUEUE_SIZE}
+      ROBOT_TCP_PORT: ${ROBOT_TCP_PORT}
+      HOST_IP: ${HOST_IP}
+    ports:
+      - target: 5001
+        published: ${ROBOT_TCP_PORT:-5001}
+        protocol: tcp
+        mode: host
+    volumes:
+      - logs:/fast_server/logs
+    networks:
+      - smr_app
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  ntp:
+    image: cturra/ntp:latest
+    environment:
+      TZ: America/Chicago
+      NTP_SERVERS: "time1.google.com,time2.google.com,time3.google.com,time4.google.com"
+    cap_add:
+      - SYS_NICE
+      - SYS_TIME
+    ports:
+      - target: 123
+        published: ${NTP_PORT:-123}
+        protocol: udp
+        mode: host
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - smr_app
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  agent:
+    image: portainer/agent:lts
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - portainer_agent
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.platform.os == linux
+
+  portainer:
+    image: portainer/portainer-ce:lts
+    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    ports:
+      - target: 9443
+        published: 9443
+        protocol: tcp
+        mode: host
+      - target: 9000
+        published: 9000
+        protocol: tcp
+        mode: host
+    volumes:
+      - portainer_data:/data
+    networks:
+      - portainer_agent
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
   imu_83_joint1:
     image: ${IMU_EDGE_IMAGE:-smart-mfg-imu-imu:latest}
     user: "${IMU_CONTAINER_USER:-0:0}"
@@ -23,6 +195,8 @@ services:
     volumes:
       - ${IMU_DATA_DIR:-/home/admin/smart-mfg-imu/data}:/app/data
       - ${IMU_SOCKET_DIR:-/run/imu-hw}:/run/imu-hw
+    networks:
+      - smr_app
     healthcheck:
       test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
       interval: 30s
@@ -30,7 +204,7 @@ services:
       retries: 3
       start_period: 15s
     deploy:
-      replicas: 1
+      replicas: 0
       placement:
         constraints:
           - node.labels.device_id == ${IMU_83_NODE_DEVICE_IP:-192.168.1.83}
@@ -59,6 +233,8 @@ services:
     volumes:
       - ${IMU_DATA_DIR:-/home/admin/smart-mfg-imu/data}:/app/data
       - ${IMU_SOCKET_DIR:-/run/imu-hw}:/run/imu-hw
+    networks:
+      - smr_app
     healthcheck:
       test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
       interval: 30s
@@ -66,7 +242,7 @@ services:
       retries: 3
       start_period: 15s
     deploy:
-      replicas: 1
+      replicas: 0
       placement:
         constraints:
           - node.labels.device_id == ${IMU_84_NODE_DEVICE_IP:-192.168.1.84}
@@ -95,6 +271,8 @@ services:
     volumes:
       - ${IMU_DATA_DIR:-/home/admin/smart-mfg-imu/data}:/app/data
       - ${IMU_SOCKET_DIR:-/run/imu-hw}:/run/imu-hw
+    networks:
+      - smr_app
     healthcheck:
       test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
       interval: 30s
@@ -102,45 +280,34 @@ services:
       retries: 3
       start_period: 15s
     deploy:
-      replicas: 1
+      replicas: 0
       placement:
         constraints:
           - node.labels.device_id == ${IMU_85_NODE_DEVICE_IP:-192.168.1.85}
       restart_policy:
         condition: on-failure
 
-  # imu_86_joint4:
-  #   image: ${IMU_EDGE_IMAGE:-smart-mfg-imu-imu:latest}
-  #   user: "${IMU_CONTAINER_USER:-0:0}"
-  #   command: ["python3", "-m", "imu_edge"]
-  #   environment:
-  #     DEVICE_ID: "86"
-  #     IMU_SOCKET_PATH: "${IMU_SOCKET_PATH:-/run/imu-hw/imu.sock}"
-  #     IMU_SESSION_ID: "imu-node-86"
-  #     IMU_SAMPLE_HZ: "${IMU_SAMPLE_HZ:-100}"
-  #     IMU_REQUEST_TARE: "${IMU_REQUEST_TARE:-true}"
-  #     IMU_RESET_COUNTER: "${IMU_RESET_COUNTER:-true}"
-  #     IMU_AUTO_START_SESSION: "${IMU_AUTO_START_SESSION:-true}"
-  #     IMU_STOP_SESSION_ON_EXIT: "${IMU_STOP_SESSION_ON_EXIT:-false}"
-  #     MQTT_BROKER_IP: "${MQTT_BROKER_IP:-mqtt-broker}"
-  #     MQTT_BROKER_PORT: "${MQTT_BROKER_PORT:-1883}"
-        # MQTT_CLIENT_ID: "${IMU_86_DEVICE_ID:-86}"
-  #     MQTT_TOPIC: "${MQTT_TOPIC:-imu/data}"
-  #     IMU_CSV_PATH: "/app/data/imu-86-joint1.csv"
-  #     IMU_EDGE_HEALTH_PATH: "/tmp/imu-edge-health-86.json"
-  #   volumes:
-  #     - ${IMU_DATA_DIR:-/home/admin/smart-mfg-imu/data}:/app/data
-  #     - ${IMU_SOCKET_DIR:-/run/imu-hw}:/run/imu-hw
-  #   healthcheck:
-  #     test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
-  #     interval: 30s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 15s
-  #   deploy:
-  #     replicas: 1
-  #     placement:
-  #       constraints:
-  #         - node.labels.device_id == 192.168.1.86
-  #     restart_policy:
-  #       condition: on-failure
+networks:
+  smr_app:
+    driver: overlay
+    attachable: true
+  portainer_agent:
+    driver: overlay
+    attachable: true
+
+configs:
+  mosquitto_config:
+    file: ./mqtt_conf/mosquitto.conf
+
+volumes:
+  portainer_data:
+  nas_backups:
+    driver_opts:
+      type: "nfs"
+      o: "addr=${DB_HOST},nolock,soft,rw"
+      device: ":/volume1/docker/postgres/backups"
+  logs:
+    driver_opts:
+      type: "nfs"
+      o: "addr=${DB_HOST},nolock,soft,rw"
+      device: ":/volume1/docker/postgres/logs"
