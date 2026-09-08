@@ -235,7 +235,8 @@ class DatabaseSingleton:
         ]
 
         env = {**os.environ, "PGPASSWORD": os.environ["PGPASSWORD"]}
-        subprocess.run(cmd, check=True, env=env)
+        await asyncio.to_thread(subprocess.run,cmd,check=True,env=env) # fix
+	# subprocess.run(cmd, check=True, env=env)
         return str(out)
 
     # Returns all IMU data from session label
