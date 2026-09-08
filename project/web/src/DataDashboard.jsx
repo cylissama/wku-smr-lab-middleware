@@ -77,6 +77,21 @@ export default function DataDashboard() {
     }, []);
 
     useEffect(() => {
+    const pollStatus = async () => {
+        try {
+            const json = await getSessionStatus();
+            setActiveSession(Boolean(json.data));
+        } catch {
+            // stay quiet on poll failures — the initial load effect already surfaces errors
+        }
+    };
+
+    const intervalId = setInterval(pollStatus, 5000);
+
+    return () => clearInterval(intervalId);
+}, []);
+
+    useEffect(() => {
         const getLatestSession = async () => {
             setIsLatestSessionLoading(true);
 
