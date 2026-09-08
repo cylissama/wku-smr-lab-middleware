@@ -14,6 +14,10 @@ function App() {
 
           <div className="flex items-center gap-4">
 
+            <button className="flex items-center gap-1 rounded bg-white px-3 py-2 text-slate-900 transition">
+              Data Dashboard
+            </button>
+
             <button
               className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-white transition hover:bg-cyan-500"
               onClick={() => {
