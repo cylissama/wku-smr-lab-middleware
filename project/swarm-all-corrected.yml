@@ -1,0 +1,200 @@
+services:
+  imu-106:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: ["python3", "-m", "imu_edge"]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ1
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "106"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-106
+      IMU_SAMPLE_HZ: "100"
+      IMU_REQUEST_TARE: "true"
+      IMU_RESET_COUNTER: "true"
+      IMU_AUTO_START_SESSION: "true"
+      IMU_STOP_SESSION_ON_EXIT: "true"
+      MQTT_BROKER_IP: 192.168.2.100
+      MQTT_BROKER_PORT: "1883"
+      MQTT_CLIENT_ID: "106"
+      MQTT_TOPIC: imu/106
+      IMU_CSV_PATH: /app/data/imu-106.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-106.json
+    healthcheck:
+      test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-107:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: ["python3", "-m", "imu_edge"]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ2
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "107"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-107
+      IMU_SAMPLE_HZ: "100"
+      IMU_REQUEST_TARE: "true"
+      IMU_RESET_COUNTER: "true"
+      IMU_AUTO_START_SESSION: "true"
+      IMU_STOP_SESSION_ON_EXIT: "true"
+      MQTT_BROKER_IP: 192.168.2.100
+      MQTT_BROKER_PORT: "1883"
+      MQTT_CLIENT_ID: "107"
+      MQTT_TOPIC: imu/107
+      IMU_CSV_PATH: /app/data/imu-107.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-107.json
+    healthcheck:
+      test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-108:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: ["python3", "-m", "imu_edge"]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ3
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "108"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-108
+      IMU_SAMPLE_HZ: "100"
+      IMU_REQUEST_TARE: "true"
+      IMU_RESET_COUNTER: "true"
+      IMU_AUTO_START_SESSION: "true"
+      IMU_STOP_SESSION_ON_EXIT: "true"
+      MQTT_BROKER_IP: 192.168.2.100
+      MQTT_BROKER_PORT: "1883"
+      MQTT_CLIENT_ID: "108"
+      MQTT_TOPIC: imu/108
+      IMU_CSV_PATH: /app/data/imu-108.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-108.json
+    healthcheck:
+      test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-109:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: ["python3", "-m", "imu_edge"]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ4
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "109"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-109
+      IMU_SAMPLE_HZ: "100"
+      IMU_REQUEST_TARE: "true"
+      IMU_RESET_COUNTER: "true"
+      IMU_AUTO_START_SESSION: "true"
+      IMU_STOP_SESSION_ON_EXIT: "true"
+      MQTT_BROKER_IP: 192.168.2.100
+      MQTT_BROKER_PORT: "1883"
+      MQTT_CLIENT_ID: "109"
+      MQTT_TOPIC: imu/109
+      IMU_CSV_PATH: /app/data/imu-109.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-109.json
+    healthcheck:
+      test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-110:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: ["python3", "-m", "imu_edge"]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == RPIIMUJ5
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "110"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-110
+      IMU_SAMPLE_HZ: "100"
+      IMU_REQUEST_TARE: "true"
+      IMU_RESET_COUNTER: "true"
+      IMU_AUTO_START_SESSION: "true"
+      IMU_STOP_SESSION_ON_EXIT: "true"
+      MQTT_BROKER_IP: 192.168.2.100
+      MQTT_BROKER_PORT: "1883"
+      MQTT_CLIENT_ID: "110"
+      MQTT_TOPIC: imu/110
+      IMU_CSV_PATH: /app/data/imu-110.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-110.json
+    healthcheck:
+      test: ["CMD", "python3", "-m", "imu_edge", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
