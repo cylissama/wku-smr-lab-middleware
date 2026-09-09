@@ -1,6 +1,16 @@
 /* Match the Data Dashboard's header (slate-950/90 + blur, cyan accents) so
    the nav bar looks the same everywhere on the site. */
 
+/* Default sidebar width (272px) is too narrow for the "Smart Manufacturing
+   Research" site title at this font size/weight - the title text overflows
+   its box and collides with the "Data Dashboard" nav button next to it.
+   Widening it gives the title room and shifts the nav buttons right to
+   match (both the title width and the content's left padding read from
+   this variable). */
+:root {
+  --vp-sidebar-width: 320px;
+}
+
 .VPNavBar {
   background-color: rgba(2, 6, 23, 0.9) !important;
   backdrop-filter: blur(6px);
