@@ -50,6 +50,7 @@ export default defineConfig({
           { text: 'Compose', link: '/docker/compose' },
           { text: 'Swarm', link: '/docker/swarm' },
           { text: 'Automations', link: '/docker/automations' },
+          { text: 'TCP Server', link: '/docker/tcp-server' },
         ],
       },
       {
