@@ -6,16 +6,18 @@ export default defineConfig({
   title: "SMR Documentation",
   description: "Documentation for the WKU Smart Manufacturing Research data broker middleware",
   themeConfig: {
-    // https://vitepress.dev/reference/default-theme-config
-    nav: [
-      { text: 'Home', link: '/' },
-      { text: 'Overview', link: '/overview/what-is-this' },
-      { text: 'Hardware', link: '/hardware/' },
-      { text: 'Data', link: '/data/database-uses' },
-      { text: 'Docker', link: '/docker/compose' },
-      { text: 'Network', link: '/network/topology' },
-      { text: 'Expanding', link: '/expanding/' },
-    ],
+    // Site title in the shared nav bar matches the main app's header exactly.
+    siteTitle: 'Smart Manufacturing Research',
+
+    // Section links (Overview/Hardware/etc.) live in the sidebar below, not
+    // the top nav, to keep the header identical to the Data Dashboard's.
+    nav: [],
+
+    // Passed through to the shared nav bar (see theme/Layout.vue) so the
+    // AI/Twins buttons match the main app's - both read from the same
+    // VITE_AI_URL / VITE_TWINS_URL build args.
+    aiUrl: process.env.VITE_AI_URL || '',
+    twinsUrl: process.env.VITE_TWINS_URL || '',
 
     sidebar: [
       {
@@ -48,6 +50,7 @@ export default defineConfig({
           { text: 'Compose', link: '/docker/compose' },
           { text: 'Swarm', link: '/docker/swarm' },
           { text: 'Automations', link: '/docker/automations' },
+          { text: 'TCP Server', link: '/docker/tcp-server' },
         ],
       },
       {
@@ -67,7 +70,6 @@ export default defineConfig({
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/cylissama/wku-smr-lab-middleware' },
-      { icon: 'github', link: 'https://github.com/Mseavers1/CS560-Smart-Manufacturing-Data' },
     ],
   },
 })

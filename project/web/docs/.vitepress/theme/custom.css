@@ -1,0 +1,21 @@
+/* Match the Data Dashboard's header (slate-950/90 + blur, cyan accents) so
+   the nav bar looks the same everywhere on the site. */
+
+.VPNavBar {
+  background-color: rgba(2, 6, 23, 0.9) !important;
+  backdrop-filter: blur(6px);
+}
+
+.VPNavBar .divider-line {
+  background-color: rgba(51, 65, 85, 0.4) !important;
+}
+
+.VPNavBar .title a.title {
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.VPNavBar .title span {
+  color: #fff;
+}

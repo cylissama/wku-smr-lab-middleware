@@ -15,5 +15,8 @@ export async function startSessionByLabel(label, isTestSession = true) {
 }
 
 export async function stopSessionRequest() {
-    return apiGet("/session/stop/");
+    // return apiGet("/session/stop/");
+    return  apiGet("/session/stop");
+
+
 }

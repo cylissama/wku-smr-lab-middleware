@@ -2,7 +2,7 @@
 
 ## The robot arm
 
-A robot arm streams joint angles and TCP (tool center point) pose as CSV lines over a raw TCP connection to the `tcp_server`, rather than over MQTT. Unlike the other devices, the robot is started manually by a human operator in the lab — it is not remotely orchestrated.
+A robot arm streams joint angles and TCP (tool center point) pose as CSV lines over a raw TCP connection to the `tcp_server`, rather than over MQTT. Unlike the other devices, the robot is started manually by a human operator in the lab — it is not remotely orchestrated. See [TCP Server](/docker/tcp-server) for how the container on the other end of that connection listens, batches, and stores this data.
 
 # Robot Joint & Pose Data Format
 
