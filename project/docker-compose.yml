@@ -68,7 +68,7 @@ services:
       context: .            
       dockerfile: tcp_server/dockerfile
 
-    container_name: tcp-fast_server
+    container_name: tcp-server
     env_file:
       - .env
     environment:
@@ -86,7 +86,7 @@ services:
     ports:
       - "${ROBOT_TCP_PORT}:5001"
     volumes:
-      - logs:/fast_server/logs
+      - logs:/tcp-server/logs
 
   ntp:
     image: cturra/ntp:latest
