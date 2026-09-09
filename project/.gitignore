@@ -1,7 +1,0 @@
-
-web/docs/.vitepress/cache/
-web/docs/.vitepress/dist/
-
-# Environment variables
-.env
-

@@ -1,4 +1,4 @@
-# CS560 Smart Manufacturing Data
+# Smart Manufactoring Research Lab @ WKU
 
 A smart manufacturing data platform for collecting, monitoring, and storing telemetry from distributed edge devices such as IMUs, cameras, and robot systems.
 

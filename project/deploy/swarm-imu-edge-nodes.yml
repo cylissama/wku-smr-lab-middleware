@@ -1,3 +1,6 @@
+# swarm stack config for the AMS stack
+#  currently only used for the IMU edge nodes
+
 services:
   imu-106:
     image: smart-mfg-imu:latest

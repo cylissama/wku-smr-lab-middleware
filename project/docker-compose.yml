@@ -1,10 +1,12 @@
+# compose file for the ActiveMiddeleware Services (AMS) stack
+
 version: "3.9"
 
 services:
 
   mqtt-broker:
     image: eclipse-mosquitto:2
-    container_name: mqtt-broker
+    container_name: AMS-mqtt-broker
     ports:
       - "${MQTT_PORT}:1883"
       - "9001:9001"
@@ -12,8 +14,10 @@ services:
       - ./mqtt_conf:/mosquitto/config
 
   fastapi-app:
-    build: .
-    container_name: fastapi-fast_server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: AMS-fastapi
     env_file:
       - .env
     environment:
@@ -57,7 +61,7 @@ services:
           ROBOT_CAMERA_URL: ${ROBOT_CAMERA_URL:-}
           DB_GUI_URL: ${DB_GUI_URL:-}
           PORTAINER_URL: ${PORTAINER_URL:-}
-      container_name: web-frontend
+      container_name: AMS-dashboard-docs
       ports:
         - "${WEB_PORT}:80"
       depends_on:
@@ -68,7 +72,7 @@ services:
       context: .            
       dockerfile: tcp_server/dockerfile
 
-    container_name: tcp-server
+    container_name: AMS-tcp-listener
     env_file:
       - .env
     environment:
@@ -90,7 +94,7 @@ services:
 
   ntp:
     image: cturra/ntp:latest
-    container_name: ntp
+    container_name: AMS-ntp
     restart: unless-stopped
     ports:
       - "${NTP_PORT}:123/udp"

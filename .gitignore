@@ -12,6 +12,9 @@ project/.env
 node_modules/
 digital-twin/node_modules/
 
+web/docs/.vitepress/cache/
+web/docs/.vitepress/dist/
+
 # macOS
 .DS_Store
 

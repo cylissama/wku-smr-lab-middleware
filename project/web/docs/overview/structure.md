@@ -21,9 +21,11 @@ wku-smr-lab-middleware/
     │   └── mosquitto.conf
     ├── SOP/                   # Standard operating procedures for the lab
     ├── tests/                 # Local test/utility scripts
+    ├── deploy/                # Standalone Swarm/Portainer stack manifests
+    │   ├── swarm-imu-edge-nodes.yml   # IMU edge node stack (multi-host Swarm)
+    │   └── portainer-agent-stack.yml  # Portainer agent stack
     ├── docker-compose.yml     # The always-on broker stack (single host)
-    ├── swarm.yml              # IMU edge node stack (multi-host Swarm)
-    ├── dockerfile              # FastAPI server image
+    ├── Dockerfile              # FastAPI server image
     └── web/                    # React + Vite dashboard, and this VitePress docs site
         ├── src/                # Dashboard UI (sessions, devices, Info library)
         ├── public/info/        # SOPs/diagrams served in-app via manifest.json
@@ -49,7 +51,7 @@ Edge devices never talk to the database directly — everything is mediated by `
 The system is deployed in two separate ways, described in detail under [Docker](/docker/compose):
 
 1. **The broker stack** (`docker-compose.yml`) — runs once, on the Data Broker Mini PC. It hosts the MQTT broker, FastAPI server, TCP server, web dashboard, and NTP service.
-2. **The IMU edge cluster** (`swarm.yml`) — runs across several Raspberry Pi nodes joined into a Docker Swarm, each pinned to a specific IMU device via node labels.
+2. **The IMU edge cluster** (`deploy/swarm-imu-edge-nodes.yml`) — runs across several Raspberry Pi nodes joined into a Docker Swarm, each pinned to a specific IMU device via node labels.
 
 ![Deployment topology diagram](diagram-3-deployment.png)
 

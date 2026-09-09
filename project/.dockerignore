@@ -17,6 +17,5 @@ SOP/
 web/
 mqtt_conf/
 
-swarm.yml
-portainer-agent-stack.yml
+deploy/
 ntp_info.md
