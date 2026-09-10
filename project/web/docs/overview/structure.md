@@ -1,39 +1,10 @@
 # How is this structured?
 
-## Repository layout
+This project is deployed almost entirely using containerization with Docker technologies.
 
-```text
-wku-smr-lab-middleware/
-├── README.md
-├── REPOS.MD                  # Links to related device-node repos and Docker Hub images
-└── project/
-    ├── db/                    # asyncpg pool + all database read/write logic
-    │   ├── database.py
-    │   └── migrations.md
-    ├── fast_server/           # FastAPI app: HTTP + WebSocket + MQTT ingestion
-    │   ├── main.py
-    │   ├── parsing.py
-    │   ├── connection_manager.py
-    │   └── loggers.py
-    ├── tcp_server/            # Raw TCP ingestion for robot telemetry
-    │   └── tcp_server.py
-    ├── mqtt_conf/             # Mosquitto broker configuration
-    │   └── mosquitto.conf
-    ├── SOP/                   # Standard operating procedures for the lab
-    ├── tests/                 # Local test/utility scripts
-    ├── deploy/                # Standalone Swarm/Portainer stack manifests
-    │   ├── swarm-imu-edge-nodes.yml   # IMU edge node stack (multi-host Swarm)
-    │   └── portainer-agent-stack.yml  # Portainer agent stack
-    ├── docker-compose.yml     # The always-on broker stack (single host)
-    ├── Dockerfile              # FastAPI server image
-    └── web/                    # React + Vite dashboard, and this VitePress docs site
-        ├── src/                # Dashboard UI (sessions, devices, Info library)
-        ├── public/info/        # SOPs/diagrams served in-app via manifest.json
-        ├── docs/                # This documentation site (VitePress)
-        ├── nginx.conf           # Serves the SPA, proxies /api/, serves /docs/
-        └── dockerfile
-```
+Docker compose and Docker swarm are used to create "stacks" that can be deployed with simple config files and then closed and opened when needed. 
 
+We 
 ## How data flows through the system
 
 Edge devices never talk to the database directly — everything is mediated by `fastapi-app` (MQTT-sourced IMU/camera data) or `tcp-server` (robot data). Both services share the same `db/database.py` module and the same PostgreSQL instance, keyed by the currently active session.

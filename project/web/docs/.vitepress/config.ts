@@ -23,6 +23,7 @@ export default defineConfig({
         items: [
           { text: 'What is this project?', link: '/overview/what-is-this' },
           { text: 'How is this structured?', link: '/overview/structure' },
+          { text: 'Github Repos', link: '/overview/repositories' },
         ],
       },
       {

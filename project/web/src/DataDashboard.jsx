@@ -228,7 +228,7 @@ export default function DataDashboard() {
                                         onChange={(event) => setIsTestSession(event.target.checked)}
                                         disabled={activeSession || isActionDisabled}
                                     />
-                                    Test Session
+                                    Fake Data
                                 </label>
                             </div>
                         </div>
@@ -239,7 +239,7 @@ export default function DataDashboard() {
                                     type="button"
                                     className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
                                 >
-                                    Clear Cache [PLHDR]
+                                    Clear Cache [WIP]
                                 </button>
 
                                 <button
@@ -248,7 +248,7 @@ export default function DataDashboard() {
                                     onClick={() => window.open(ROBOT_CAMERA_URL, "_blank")}
                                     disabled={!ROBOT_CAMERA_URL}
                                 >
-                                    Open Robot Camera
+                                    Enclosure Safety Camera
                                 </button>
 
                                 <button
@@ -257,7 +257,7 @@ export default function DataDashboard() {
                                     onClick={() => window.open(DB_GUI_URL, "_blank")}
                                     disabled={!DB_GUI_URL}
                                 >
-                                    Open Database GUI
+                                    pgAdmin
                                 </button>
 
                                 <button
@@ -266,7 +266,7 @@ export default function DataDashboard() {
                                     onClick={() => window.open(PORTAINER_URL, "_blank")}
                                     disabled={!PORTAINER_URL}
                                 >
-                                    Open Portainer
+                                    Portainer [WIP]
                                 </button>
                             </div>
                         </div>

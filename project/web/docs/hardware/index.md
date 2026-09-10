@@ -1,12 +1,12 @@
 # The hardware behind the project
 
-The system spans lab machines, edge Raspberry Pis, and a robot arm. Everything below is tied together over the lab network described in [Network Topology](/network/topology).
+The system spans lab machines, edge Raspberry Pis, and a FANUC industrial robot arm. Everything below is tied together over the lab network described in [Network Topology](/network/topology).
 
 ## Core infrastructure
 
 | Machine | Role |
 | --- | --- |
-| **Data Broker Mini PC** | Always-on host for the `docker-compose.yml` stack (MQTT broker, FastAPI server, TCP server, web dashboard, NTP). |
+| (OUTDATED) **Mini PC** | Always-on host for the `docker-compose.yml` stack (MQTT broker, FastAPI server, TCP server, web dashboard, NTP). |
 | **Synology NAS** | Hosts the PostgreSQL database and provides NFS volumes for DB backups and logs. |
 | **Alienware dev PC** | Used to SSH into the broker and orchestrate test sessions from the upstairs lab. |
 | **Image analysis machine** | Runs the camera sensor-fusion / pi-stream container that processes camera feeds. |

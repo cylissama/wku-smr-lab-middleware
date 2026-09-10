@@ -1,4 +1,4 @@
-# Data Broker Mini PC
+# Mini PC
 
 This mini pc is the current home of the middleware Docker containers and most middleware services.
 
