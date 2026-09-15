@@ -81,7 +81,7 @@ USW PRO 24
 | --- | --- | --- | --- | --- | --- |
 | AP | | 74:83:C2:BC:60:C7 | ubnt | password | SSID `Sandbox_AP`, password `password` |
 | DisplayPi | 192.168.4.4 | B8:27:EB:B2:06:DC | admin | password | |
-| AlienWare | DHCP | CC:96:E5:20:91:DB | | | |
+| AlienWare | 192.168.4.253 | CC:96:E5:20:91:DB | user | password | |
 | NAS_Backup | 192.168.4.236 | 90:09:D0:70:9D:23 | mcbuckle | NASpassword_207 | |
 | Ubuntu Dell Computer (207) -2 | DHCP | | ubuntu | Password | Share/user group `IIoT` |
 | WINDOWS PC | DHCP | B0:4F:13:12:11:8F | | | |
