@@ -41,11 +41,6 @@ Both are tunable via `.env` (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`). This keeps i
 
 ## Changing the schema
 
-Because parsing, database inserts, and table columns all have to agree on field order, schema changes follow a fixed sequence (see `project/SOP/database-updates.md` and `project/db/migrations.md` for the full history):
-
-1. **Add the column(s)** in Postgres (pgAdmin or `ALTER TABLE ... ADD COLUMN`), without `NOT NULL` — existing rows would violate that constraint immediately. Backfill first, then tighten the constraint later if needed.
-2. **Update parsing** — `fast_server/parsing.py` for IMU/camera, `tcp_server/tcp_server.py` for the robot. Field order here must match the order the device actually sends data in.
-3. **Update the matching insert method(s)** in `db/database.py` — both the `_item()` and `_batch()` variants for that device type, keeping the tuple order aligned with the `INSERT ... VALUES` column list.
-4. **Rebuild and restart**: `docker compose down && docker compose up --build` on the Data Broker Mini PC so the new code is actually running.
+Because parsing, database inserts, and table columns all have to agree on field order, schema changes follow a fixed sequence — see [Updating the production database schema](/data/schema-changes) for the full walkthrough (adding a column, and adding a new linked table), and `project/db/migrations.md` for the change history.
 
 See [Database structure](/data/database-structure) for the current table layout.

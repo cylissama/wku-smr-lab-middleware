@@ -1,0 +1,161 @@
+# Standalone, NAS-free replica of the AMS stack for local/portable testing.
+#
+# docker-compose.yml assumes it's running on the Data Broker Mini PC in the lab:
+# DB_HOST points at the NAS's Postgres instance, and the nas_backups/logs volumes
+# are NFS mounts back to that same NAS. Neither is reachable from a laptop or CI
+# runner outside the lab network.
+#
+# This file is a self-contained alternative — not an override merged with
+# docker-compose.yml — that swaps in a bundled Postgres + pgAdmin and plain
+# local Docker volumes for backups/logs, so the full stack comes up on any
+# machine with nothing but Docker and a `.env` file (see .env.example).
+#
+# Usage (from project/):
+#   docker compose -f docker-compose.local.yml up -d --build
+#   docker compose -f docker-compose.local.yml down
+#
+# Mirrors docker-compose.yml service-for-service; keep the two in sync by hand
+# when changing mqtt-broker/fastapi-app/tcp/web/ntp config.
+
+version: "3.9"
+
+services:
+
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: AMS-mqtt-broker-local
+    ports:
+      - "${MQTT_PORT}:1883"
+      - "9001:9001"
+    volumes:
+      - ./mqtt_conf:/mosquitto/config
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: AMS-postgres-local
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data_local:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: AMS-pgadmin-local
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data_local:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
+  fastapi-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: AMS-fastapi-local
+    env_file:
+      - .env
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - NTP_SERVER=ntp
+      # Overrides whatever DB_HOST/DB_PORT is set to in .env — always talk to
+      # the bundled postgres service above, never the NAS.
+      - PGHOST=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - PGUSER=${DB_USER}
+      - PGPASSWORD=${DB_PASSWORD}
+      - PGDATABASE=${DB_NAME}
+      - QUEUE_SIZE=${QUEUE_SIZE}
+      - B_TIMEOUT=${B_TIMEOUT}
+      - BATCHES=${BATCHES}
+      - MQTT_PORT=${MQTT_PORT}
+      - ROBOT_TCP_PORT=${ROBOT_TCP_PORT}
+      - PGPORT=5432
+    ports:
+      - "${FASTAPI_PORT}:8000"
+    volumes:
+      - db_backups_local:/db_backups
+      - app_logs_local:/fast_server/logs
+    depends_on:
+      - mqtt-broker
+      - postgres
+
+  web:
+    build:
+      context: ./web
+      args:
+        HOST_IP: ${HOST_IP}
+        FASTAPI_PORT: ${FASTAPI_PORT}
+        VITE_API_URL: ${VITE_API_URL:-}
+        VITE_WS_URL: ${VITE_WS_URL:-}
+        VITE_AI_URL: ${VITE_AI_URL:-}
+        VITE_TWINS_URL: ${VITE_TWINS_URL:-}
+        VITE_ROBOT_CAMERA_URL: ${VITE_ROBOT_CAMERA_URL:-}
+        VITE_DB_GUI_URL: ${VITE_DB_GUI_URL:-}
+        VITE_PORTAINER_URL: ${VITE_PORTAINER_URL:-}
+        ROBOT_CAMERA_URL: ${ROBOT_CAMERA_URL:-}
+        DB_GUI_URL: ${DB_GUI_URL:-}
+        PORTAINER_URL: ${PORTAINER_URL:-}
+    container_name: AMS-dashboard-docs-local
+    ports:
+      - "${WEB_PORT}:80"
+    depends_on:
+      - fastapi-app
+
+  tcp:
+    build:
+      context: .
+      dockerfile: tcp_server/dockerfile
+    container_name: AMS-tcp-listener-local
+    env_file:
+      - .env
+    environment:
+      - PGHOST=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - NTP_SERVER=ntp
+      - PGPORT=5432
+      - PGUSER=${DB_USER}
+      - PGPASSWORD=${DB_PASSWORD}
+      - PGDATABASE=${DB_NAME}
+      - BATCHES=${BATCHES}
+      - B_TIMEOUT=${B_TIMEOUT}
+      - QUEUE_SIZE=${QUEUE_SIZE}
+      - ROBOT_TCP_PORT=5001
+      - HOST_IP=${HOST_IP}
+    ports:
+      - "${ROBOT_TCP_PORT}:5001"
+    volumes:
+      - app_logs_local:/tcp-server/logs
+    depends_on:
+      - postgres
+
+  ntp:
+    image: cturra/ntp:latest
+    container_name: AMS-ntp-local
+    restart: unless-stopped
+    ports:
+      - "${NTP_PORT}:123/udp"
+    environment:
+      - TZ=America/Chicago
+      - NTP_SERVERS="time1.google.com,time2.google.com,time3.google.com,time4.google.com"
+    cap_add:
+      - SYS_NICE
+      - SYS_TIME
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+
+volumes:
+  postgres_data_local:
+  pgadmin_data_local:
+  db_backups_local:
+  app_logs_local:

@@ -12,6 +12,7 @@ A smart manufacturing data platform (WKU SMR Lab) that ingests telemetry from di
 project/
 ├── db/                    # asyncpg pool + all database read/write logic (shared by fastapi-app and tcp)
 │   ├── database.py        # DatabaseSingleton — one pool per container
+│   ├── schema.sql         # from-scratch schema for local/portable Postgres, kept in sync with migrations.md
 │   └── migrations.md      # hand-applied SQL migration log (no migration tool)
 ├── fast_server/           # FastAPI app: HTTP + WebSocket + MQTT ingestion
 │   ├── main.py            # routes, MQTT subscriptions, batch workers, startup/shutdown
@@ -20,7 +21,6 @@ project/
 │   └── loggers.py
 ├── tcp_server/tcp_server.py   # raw asyncio TCP listener for robot telemetry (own process/container)
 ├── mqtt_conf/mosquitto.conf   # Mosquitto broker config
-├── SOP/                   # lab standard operating procedures (test runs, swarm ops, network notes)
 ├── tests/                 # unittest-based tests, run as a package from repo root (see below)
 ├── deploy/                # standalone Swarm/Portainer stack manifests for the edge-node cluster
 ├── docker-compose.yml     # the always-on broker stack (single host: mqtt, fastapi, tcp, web, ntp)
@@ -71,10 +71,12 @@ npm run docs:build
 ```bash
 docker compose -f project/docker-compose.yml up -d
 ```
-Requires a `.env` file next to `docker-compose.yml` (not committed) providing `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `MQTT_PORT`, `FASTAPI_PORT`, `WEB_PORT`, `ROBOT_TCP_PORT`, `NTP_PORT`, `HOST_IP`, `QUEUE_SIZE`, `BATCHES`, `B_TIMEOUT`, and the `VITE_*`/`*_URL` build args consumed by `web/dockerfile`.
+Requires a `.env` file next to `docker-compose.yml` (not committed, see `project/.env.example`) providing `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `MQTT_PORT`, `FASTAPI_PORT`, `WEB_PORT`, `ROBOT_TCP_PORT`, `NTP_PORT`, `HOST_IP`, `QUEUE_SIZE`, `BATCHES`, `B_TIMEOUT`, and the `VITE_*`/`*_URL` build args consumed by `web/dockerfile`.
+
+By default `DB_HOST` points at the lab NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts to that same NAS — this only works from inside the lab network. To replicate the stack elsewhere: `docker compose --profile local-db up -d` adds a bundled `postgres`/`pgadmin` alongside the lab stack (still requires NFS access for backups/logs unless unused); `docker compose -f project/docker-compose.local.yml up -d` is a fully self-contained, NAS-free copy of the whole stack (bundled Postgres/pgAdmin, local volumes) for testing on any machine. See `project/web/docs/docker/compose.md`.
 
 ## Notes for changes in this repo
 
 - `db/database.py` is imported by both `fast_server` (FastAPI process) and `tcp_server.py` (separate process/container) — changes to its interface affect both call sites, and `DatabaseSingleton` state (device/session caches) is **not** shared between the two processes.
 - Timestamps: the TCP robot protocol is parsed assuming `US/Eastern` local time and converted to UTC epoch (`tcp_server.py`); IMU/camera timestamps come pre-parsed from device payloads via `fast_server/parsing.py`. Keep this asymmetry in mind when touching time handling.
-- `SOP/` documents describe real physical lab procedures (SSH targets, IP addresses, physical device steps) for running a data-collection session — useful context for understanding *why* the session/backup/websocket flow is shaped the way it is, but not something to treat as generic developer docs.
+- Lab standard operating procedures (physical lab steps, SSH targets, IP addresses) live in the VitePress docs site under `project/web/docs/operations/` and `project/web/docs/expanding/` — e.g. `operations/running-a-test.md` and `expanding/swarm-nodes.md` — useful context for understanding *why* the session/backup/websocket flow is shaped the way it is, but not something to treat as generic developer docs. There is a separate, unrelated copy of some of this content baked into `project/web/public/info/` for the dashboard's in-app "Info" document library (see `docker/automations.md`'s "Dashboard document library generation") — don't confuse the two.

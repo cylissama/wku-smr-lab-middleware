@@ -4,6 +4,7 @@ import StatusIndicator from "./components/StatusIndicator";
 import BackupCard from "./components/BackupCard";
 import DashboardPanel from "./components/DashboardPanel";
 import {
+    getSessionLabels,
     getSessionStatus,
     getSessions,
     startSessionByLabel,
@@ -14,9 +15,18 @@ import { sendDashboardMessage } from "./api/messageApi";
 const ROBOT_CAMERA_URL = import.meta.env.VITE_ROBOT_CAMERA_URL;
 const DB_GUI_URL = import.meta.env.VITE_DB_GUI_URL;
 const PORTAINER_URL = import.meta.env.VITE_PORTAINER_URL;
+const DEFAULT_SESSION_LABEL_NAME = "Full System";
 
 function getErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
+}
+
+// session.label is used as a raw URL path segment (see /session/start/{label},
+// /imu/{label}, etc.), so it must never contain "/" or other characters that
+// are unsafe in a path segment — collapse anything but alphanumerics/-/_ into
+// a single underscore, regardless of what a session_label category is named.
+function slugifyForLabel(value) {
+    return value.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 function getSessionDisplayValue(session) {
@@ -47,6 +57,11 @@ export default function DataDashboard() {
     const [isStatusLoading, setIsStatusLoading] = useState(true);
     const [isLatestSessionLoading, setIsLatestSessionLoading] = useState(true);
     const [dashboardError, setDashboardError] = useState("");
+    const [isConfirmingSession, setIsConfirmingSession] = useState(false);
+    const [isStartButtonShaking, setIsStartButtonShaking] = useState(false);
+    const [sessionLabelOptions, setSessionLabelOptions] = useState([]);
+    const [selectedSessionLabel, setSelectedSessionLabel] = useState("");
+    const [isSessionLabelsLoading, setIsSessionLabelsLoading] = useState(true);
 
     const sendMessage = async (dest, type, msg) => {
         try {
@@ -118,14 +133,41 @@ export default function DataDashboard() {
         getLatestSession();
     }, []);
 
+    useEffect(() => {
+        const loadSessionLabels = async () => {
+            setIsSessionLabelsLoading(true);
+
+            try {
+                const json = await getSessionLabels();
+                const labels = Array.isArray(json.data) ? json.data : [];
+                setSessionLabelOptions(labels);
+
+                const defaultLabel =
+                    labels.find((option) => option.name === DEFAULT_SESSION_LABEL_NAME) ?? labels[0];
+
+                if (defaultLabel) {
+                    setSelectedSessionLabel(defaultLabel.name);
+                }
+            } catch (e) {
+                const message = `Unable to load session labels: ${getErrorMessage(e)}`;
+                setDashboardError((current) => current || message);
+                await sendMessage("camera", "error", message);
+            } finally {
+                setIsSessionLabelsLoading(false);
+            }
+        };
+
+        loadSessionLabels();
+    }, []);
+
     const startSession = async () => {
         setDashboardError("");
         await sendMessage("misc", "info", "Starting new session...");
 
         try {
             const now = new Date();
-            const label = "ses_" + now.toISOString();
-            const data = await startSessionByLabel(label, isTestSession);
+            const label = `${slugifyForLabel(selectedSessionLabel)}_${now.toISOString()}`;
+            const data = await startSessionByLabel(label, isTestSession, selectedSessionLabel);
 
             if (data.success) {
                 setActiveSession(true);
@@ -143,6 +185,17 @@ export default function DataDashboard() {
             setDashboardError(message);
             await sendMessage("misc", "error", message);
         }
+    };
+
+    const handleStartSessionClick = async () => {
+        if (!isConfirmingSession) {
+            setIsConfirmingSession(true);
+            setIsStartButtonShaking(true);
+            return;
+        }
+
+        setIsConfirmingSession(false);
+        await startSession();
     };
 
     const stopSession = async () => {
@@ -170,7 +223,15 @@ export default function DataDashboard() {
         }
     };
 
-    const isActionDisabled = isStatusLoading || isLatestSessionLoading;
+    useEffect(() => {
+        if (activeSession) {
+            setIsConfirmingSession(false);
+            setIsStartButtonShaking(false);
+        }
+    }, [activeSession]);
+
+    const isActionDisabled = isStatusLoading || isLatestSessionLoading || isSessionLabelsLoading;
+    const canStartSession = !activeSession && !isActionDisabled && Boolean(selectedSessionLabel);
 
     return (
         <div className="min-h-screen bg-gray-100 text-gray-900">
@@ -202,14 +263,47 @@ export default function DataDashboard() {
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    type="button"
-                                    className="rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                                <select
+                                    className="w-48 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 disabled:cursor-not-allowed disabled:bg-gray-100"
+                                    value={selectedSessionLabel}
+                                    onChange={(event) => setSelectedSessionLabel(event.target.value)}
                                     disabled={activeSession || isActionDisabled}
-                                    onClick={startSession}
                                 >
-                                    {isStatusLoading ? "Loading..." : "Start Session"}
-                                </button>
+                                    {sessionLabelOptions.length === 0 && (
+                                        <option value="">
+                                            {isSessionLabelsLoading ? "Loading labels..." : "No labels available"}
+                                        </option>
+                                    )}
+                                    {sessionLabelOptions.map((option) => (
+                                        <option key={option.id} value={option.name}>
+                                            {option.name}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        className={`w-40 rounded-md bg-green-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400 ${
+                                            isStartButtonShaking ? "animate-wiggle" : ""
+                                        }`}
+                                        disabled={!canStartSession}
+                                        onClick={handleStartSessionClick}
+                                        onAnimationEnd={() => setIsStartButtonShaking(false)}
+                                    >
+                                        {isStatusLoading
+                                            ? "Loading..."
+                                            : isConfirmingSession
+                                              ? "Confirm & Start"
+                                              : "Start Session"}
+                                    </button>
+
+                                    {isConfirmingSession && (
+                                        <p className="absolute left-0 top-full z-10 mt-1 w-48 text-xs font-medium text-gray-600">
+                                            Full test session? "Fake Data" Un-checked or just testing components? "Fake Data" Checked
+                                        </p>
+                                    )}
+                                </div>
 
                                 <button
                                     type="button"
