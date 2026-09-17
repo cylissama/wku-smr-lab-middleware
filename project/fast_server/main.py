@@ -24,6 +24,8 @@ def build_allowed_origins() -> list[str]:
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        f"http://localhost:{web_port}",
+        f"http://localhost:{fastapi_port}",
         f"http://{host_ip}",
         f"http://{host_ip}:{web_port}",
         f"http://{host_ip}:3000",

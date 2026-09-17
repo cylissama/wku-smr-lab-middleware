@@ -47,6 +47,8 @@ export default function DataDashboard() {
     const [isStatusLoading, setIsStatusLoading] = useState(true);
     const [isLatestSessionLoading, setIsLatestSessionLoading] = useState(true);
     const [dashboardError, setDashboardError] = useState("");
+    const [isConfirmingSession, setIsConfirmingSession] = useState(false);
+    const [isStartButtonShaking, setIsStartButtonShaking] = useState(false);
 
     const sendMessage = async (dest, type, msg) => {
         try {
@@ -145,6 +147,17 @@ export default function DataDashboard() {
         }
     };
 
+    const handleStartSessionClick = async () => {
+        if (!isConfirmingSession) {
+            setIsConfirmingSession(true);
+            setIsStartButtonShaking(true);
+            return;
+        }
+
+        setIsConfirmingSession(false);
+        await startSession();
+    };
+
     const stopSession = async () => {
         setDashboardError("");
         await sendMessage("misc", "info", "Stopping the current session...");
@@ -169,6 +182,13 @@ export default function DataDashboard() {
             setIsStopping(false);
         }
     };
+
+    useEffect(() => {
+        if (activeSession) {
+            setIsConfirmingSession(false);
+            setIsStartButtonShaking(false);
+        }
+    }, [activeSession]);
 
     const isActionDisabled = isStatusLoading || isLatestSessionLoading;
 
@@ -202,14 +222,29 @@ export default function DataDashboard() {
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                    type="button"
-                                    className="rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-                                    disabled={activeSession || isActionDisabled}
-                                    onClick={startSession}
-                                >
-                                    {isStatusLoading ? "Loading..." : "Start Session"}
-                                </button>
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        className={`w-40 rounded-md bg-green-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400 ${
+                                            isStartButtonShaking ? "animate-wiggle" : ""
+                                        }`}
+                                        disabled={activeSession || isActionDisabled}
+                                        onClick={handleStartSessionClick}
+                                        onAnimationEnd={() => setIsStartButtonShaking(false)}
+                                    >
+                                        {isStatusLoading
+                                            ? "Loading..."
+                                            : isConfirmingSession
+                                              ? "Confirm & Start"
+                                              : "Start Session"}
+                                    </button>
+
+                                    {isConfirmingSession && (
+                                        <p className="absolute left-0 top-full z-10 mt-1 w-48 text-xs font-medium text-gray-600">
+                                            Full test session? "Fake Data" Un-checked or just testing components? "Fake Data" Checked
+                                        </p>
+                                    )}
+                                </div>
 
                                 <button
                                     type="button"
