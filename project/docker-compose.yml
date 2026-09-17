@@ -107,8 +107,46 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
 
+  # --- Optional local database, for replicating the stack outside the lab ---
+  # The lab deployment points DB_HOST at the NAS-hosted Postgres instance, which
+  # isn't reachable from a laptop or CI box. Bring these two up alongside the
+  # rest of the stack with `docker compose --profile local-db up -d` and set
+  # DB_HOST=postgres / DB_PORT=5432 in .env to use them instead of the NAS.
+  # Note: nas_backups/logs below are still NFS-mounted to the NAS regardless of
+  # this profile — for a fully NAS-free run, use docker-compose.local.yml instead.
+  postgres:
+    image: postgres:16-alpine
+    container_name: AMS-postgres
+    profiles:
+      - local-db
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: AMS-pgadmin
+    profiles:
+      - local-db
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+
 volumes:
   chrony-state:
+  postgres_data:
+  pgadmin_data:
   nas_backups:
     driver_opts:
       type: "nfs"

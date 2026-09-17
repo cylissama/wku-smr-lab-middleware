@@ -68,3 +68,27 @@ docker compose ps
 ```
 
 This stack is intentionally separate from the IMU edge nodes, which are deployed as a Docker **Swarm** stack instead — see [Swarm](/docker/swarm).
+
+## Running outside the lab
+
+`docker-compose.yml` assumes it's running on the Data Broker Mini PC: `DB_HOST` points at the NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts back to that same NAS. Neither is reachable from a laptop or CI runner. Two options exist for replicating the stack elsewhere, both driven by `project/.env` — copy `project/.env.example` to `project/.env` and fill in real values first.
+
+### Option A — add a local DB alongside the lab stack
+
+`docker-compose.yml` includes optional `postgres` and `pgadmin` services behind the `local-db` [Compose profile](https://docs.docker.com/compose/how-tos/profiles/), off by default:
+
+```bash
+docker compose --profile local-db up -d
+```
+
+This adds a bundled Postgres (`AMS-postgres`) and pgAdmin (`AMS-pgadmin`, default `http://localhost:5050`) to the same stack. To actually use them instead of the NAS, set `DB_HOST=postgres` and `DB_PORT=5432` in `.env`. Note the `nas_backups`/`logs` volumes are unaffected by this profile — they still require NFS access to `${DB_HOST}`'s NAS unless you're only using the local DB for something that doesn't touch backups.
+
+### Option B — fully portable, no NAS required
+
+`docker-compose.local.yml` is a self-contained copy of the full stack (mqtt, fastapi, tcp, web, ntp, plus the same `postgres`/`pgadmin` services) with `nas_backups`/`logs` replaced by plain local Docker volumes and `DB_HOST` hardcoded to the bundled Postgres. This is the option for running the entire system — ingestion, dashboard, database, backups — on any machine with nothing but Docker:
+
+```bash
+docker compose -f docker-compose.local.yml up -d --build
+```
+
+It's a separate file rather than an override merged with `docker-compose.yml`, kept manually in sync, so it has no dependency on the NAS-specific volume config at all.
