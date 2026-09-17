@@ -92,3 +92,17 @@ docker compose -f docker-compose.local.yml up -d --build
 ```
 
 It's a separate file rather than an override merged with `docker-compose.yml`, kept manually in sync, so it has no dependency on the NAS-specific volume config at all.
+
+### Accessing pgAdmin locally
+
+Both Option A and Option B bring up a `pgadmin` container at `http://localhost:${PGADMIN_PORT}` (default `5050`).
+
+- **pgAdmin login** — `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` from your `project/.env` (falls back to `admin@example.com` / `admin` if left unset — see `docker-compose.yml`/`docker-compose.local.yml`).
+- **Connecting to the database inside pgAdmin** — add a new server using:
+  - Host: `postgres` (the Compose service name, not `localhost`)
+  - Port: `5432`
+  - Maintenance database: `${DB_NAME}`
+  - Username: `${DB_USER}`
+  - Password: `${DB_PASSWORD}`
+
+  All four come from the same `project/.env` used to bring up the stack.

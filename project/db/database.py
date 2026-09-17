@@ -27,6 +27,13 @@ class MissingDatabaseDetails(Exception):
         self.data = data
         self.message = message
 
+class InvalidSessionLabel(Exception):
+
+    def __init__(self, message, data=None):
+        super().__init__(message)
+        self.data = data
+        self.message = message
+
 # Singleton of Database (only 1 per container)
 class DatabaseSingleton:
     _instance = None
@@ -710,8 +717,37 @@ class DatabaseSingleton:
 
         return found is not None
 
+    # Returns the registered session label categories (id, name), for populating
+    # the "session type" dropdown. New categories are added via a plain INSERT
+    # into session_label — no code change needed for the list to grow.
+    async def get_session_labels(self):
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, name FROM session_label ORDER BY id"
+            )
+
+        return [dict(r) for r in rows]
+
+    # Resolves a session label category name to its id, raising if it isn't
+    # a registered category (enforces that every session picks a valid one).
+    async def get_session_label_id(self, session_label_name) -> int:
+
+        async with self.pool.acquire() as conn:
+            label_id = await conn.fetchval(
+                "SELECT id FROM session_label WHERE name = $1",
+                session_label_name
+            )
+
+        if label_id is None:
+            raise InvalidSessionLabel(
+                f"'{session_label_name}' is not a registered session label. Add it to session_label first."
+            )
+
+        return label_id
+
     # Call to create a new session in DB & update current session
-    async def create_session(self, label, is_test_session=True):
+    async def create_session(self, label, session_label_name, is_test_session=True):
 
         session_id = await self.get_latest_session()
 
@@ -719,13 +755,16 @@ class DatabaseSingleton:
         if await self.existing_session(label):
             raise ExistingSessionLabel(f"Session label [{label}] already exist. Please select another one.")
 
+        session_label_id = await self.get_session_label_id(session_label_name)
+
         async with self.pool.acquire() as conn:
 
             session_id = await conn.fetchval(
                 """
-                INSERT INTO session (label, started_at, is_test_session) VALUES ($1, $2, $3) RETURNING id
+                INSERT INTO session (label, started_at, is_test_session, session_label_id)
+                VALUES ($1, $2, $3, $4) RETURNING id
                 """,
-                label, self.get_time(), is_test_session
+                label, self.get_time(), is_test_session, session_label_id
             )
 
         self.current_session_id = session_id

@@ -17,6 +17,9 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# Personal scratch/planning notes, not meant to be committed
+.idea.md
 *.suo
 *.ntvs*
 *.njsproj

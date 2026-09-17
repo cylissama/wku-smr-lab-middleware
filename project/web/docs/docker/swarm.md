@@ -26,26 +26,45 @@ Each active IMU (`imu_83_joint1`, `imu_84_joint2`, `imu_85_joint3`, with `imu_86
 
 ## Bringing a node online
 
-Full step-by-step is in `project/SOP/IMU_SETUP.md`; the shape of it:
+Full step-by-step — Pi host setup, systemd service, Swarm join, and deployment — is in [Expanding &gt; Bringing a node online](/expanding/swarm-nodes). The short version: join the Pi to the Swarm as a worker, label it with its `device_id`, get the `imu-hw` host service healthy, then deploy or refresh the stack from the manager:
 
-1. Join the Pi to the Swarm as a worker: `docker swarm join --token <worker-token> <manager-ip>:2377`.
-2. From the manager, label the node so placement constraints can match it: `docker node update --label-add device_id=<pi-ip> <node-name>`.
-3. On the Pi, install and start the `imu-hw` systemd service (the `imu_host` process — see [Hardware](/hardware/)) and confirm `/v1/readyz` reports healthy over the Unix socket.
-4. From the manager, deploy or refresh the stack:
-
-   ```bash
-   set -a; source ./.env; set +a
-   docker stack deploy --resolve-image never -c swarm.yml imu
-   ```
-
-5. Verify scheduling and health:
-
-   ```bash
-   docker service ps imu_imu_83_joint1
-   docker service logs -f imu_imu_83_joint1
-   ```
+```bash
+set -a; source ./.env; set +a
+docker stack deploy --resolve-image never -c swarm.yml imu
+```
 
 To tear the IMU stack down: `docker stack rm imu`.
+
+## On-demand IMU activation
+
+The IMU services in `swarm.yml` stay dormant by default rather than starting to stream the moment the stack is deployed — `deploy.replicas: 0` for each IMU service, plus `IMU_AUTO_START_SESSION=false` in `.env`. That gives two layers of protection: containers don't run until an operator explicitly scales them up, and even once running, a container doesn't auto-start a session unless told to.
+
+Previously the IMU services ran with one replica and auto-started sessions, so data streaming began immediately on stack deployment. For Swarm/Portainer operations, IMU nodes should only activate when an operator (or eventually a dashboard control) explicitly starts them.
+
+After `docker stack deploy -c swarm.yml smr --with-registry-auth`, the IMU services (`smr_imu_83_joint1`, `smr_imu_84_joint2`, `smr_imu_85_joint3`) exist in the stack with zero running tasks until scaled up.
+
+**Start an IMU service** (from the manager):
+
+```bash
+docker service scale smr_imu_83_joint1=1
+```
+
+**Stop it again:**
+
+```bash
+docker service scale smr_imu_83_joint1=0
+```
+
+**Check status:**
+
+```bash
+docker stack services smr
+docker service ps smr_imu_83_joint1
+```
+
+The same scaling can be done from Portainer: open the Swarm environment → **Services** → locate the IMU service → use the scale control to move replicas between `0` and `1`.
+
+The intended long-term flow is a dashboard button that scales the selected IMU service from `0` to `1` and then explicitly triggers a session/stream start — keeping deployment control (is the service running at all) separate from data-collection control (is it actively streaming).
 
 ## Known limitation: I2C device access under Swarm (resolved)
 

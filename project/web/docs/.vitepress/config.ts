@@ -15,6 +15,7 @@ export default defineConfig({
       { text: 'Docker', link: '/docker/compose' },
       { text: 'Network', link: '/network/topology' },
       { text: 'Expanding', link: '/expanding/' },
+      { text: 'Operations', link: '/operations/running-a-test' },
     ],
 
     sidebar: [
@@ -41,6 +42,8 @@ export default defineConfig({
         items: [
           { text: 'Database uses', link: '/data/database-uses' },
           { text: 'Database structure', link: '/data/database-structure' },
+          { text: 'Accessing the database', link: '/data/accessing-database' },
+          { text: 'Updating the schema', link: '/data/schema-changes' },
         ],
       },
       {
@@ -50,6 +53,7 @@ export default defineConfig({
           { text: 'Swarm', link: '/docker/swarm' },
           { text: 'Automations', link: '/docker/automations' },
           { text: 'TCP Server', link: '/docker/tcp-server' },
+          { text: 'Portainer', link: '/docker/portainer' },
         ],
       },
       {
@@ -57,6 +61,7 @@ export default defineConfig({
         items: [
           { text: 'Topology', link: '/network/topology' },
           { text: 'IP Address Table', link: '/network/ip-addresses' },
+          { text: 'Compose vs. Swarm parity', link: '/network/compose-vs-swarm-parity' },
         ],
       },
       {
@@ -64,6 +69,13 @@ export default defineConfig({
         items: [
           { text: 'Expanding the system', link: '/expanding/' },
           { text: 'Bringing a node online', link: '/expanding/swarm-nodes' },
+        ],
+      },
+      {
+        text: 'Operations',
+        items: [
+          { text: 'Running a test session', link: '/operations/running-a-test' },
+          { text: 'Camera live feed', link: '/operations/camera-ops' },
         ],
       },
     ],
