@@ -1,4 +1,5 @@
 import os, asyncio, aiohttp, time
+from aiohttp import web
 from typing import Optional, Tuple
 from datetime import datetime
 from fast_server import loggers
@@ -8,6 +9,11 @@ from zoneinfo import ZoneInfo
 # Batched info for ROBOT
 queue_size = float(os.getenv("QUEUE_SIZE", 5000))
 robot_queue = asyncio.Queue(maxsize=queue_size)
+
+# Items pulled off robot_queue into the current batch but not yet inserted --
+# robot_queue.empty() alone misses this window, so fastapi-app's drain check
+# (via /queue/status below) needs both numbers.
+robot_pending = 0
 
 # Helper to send messages from TCP server to FASTAPI server
 async def send_to_fastapi(msg: str, msg_type: str = "normal"):
@@ -33,6 +39,8 @@ async def send_to_fastapi(msg: str, msg_type: str = "normal"):
 
 # Continuously comsumes the queue and performs batched DB insertions
 async def robot_worker(batch_size=50, flush_interval=2.0):
+    global robot_pending
+
     db = await DatabaseSingleton.get_instance()
     batch = []
     last_flush = time.monotonic()
@@ -44,6 +52,8 @@ async def robot_worker(batch_size=50, flush_interval=2.0):
         except asyncio.TimeoutError:
             pass
 
+        robot_pending = len(batch)
+
         now = time.monotonic()
         if (len(batch) >= batch_size) or (batch and (now - last_flush) >= flush_interval):
             try:
@@ -51,6 +61,7 @@ async def robot_worker(batch_size=50, flush_interval=2.0):
                 loggers.cur_robot_logger.info(f"Inserted {len(batch)} robot rows.")
                 await send_to_fastapi(f"Inserted {len(batch)} robot rows.")
                 batch.clear()
+                robot_pending = 0
                 last_flush = now
             except Exception as e:
                 loggers.cur_robot_logger.error(f"DB batch insert failed: {e}")
@@ -127,18 +138,44 @@ async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
         await writer.wait_closed()
         loggers.cur_robot_logger.info("Writer Closed")
 
+# GET /queue/status -- lets fastapi-app's drain_queues() confirm robot data is
+# fully flushed before stop_session ends the session. depth is items still
+# queued; pending is items pulled into the in-flight batch but not yet
+# inserted (see robot_worker) -- both must be zero for "empty" to be true.
+async def queue_status(request: "web.Request") -> "web.Response":
+    depth = robot_queue.qsize()
+    return web.json_response({
+        "depth": depth,
+        "pending": robot_pending,
+        "empty": depth == 0 and robot_pending == 0,
+    })
+
+
+async def start_status_server(port: int) -> None:
+    app = web.Application()
+    app.router.add_get("/queue/status", queue_status)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    loggers.cur_robot_logger.info(f"[TCP] Queue status endpoint listening on :{port}")
+
+
 # Starts the TCP server
 async def start_tcp_server(host: Optional[str] = None, port: int = 5001):
     host = host or os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("ROBOT_TCP_PORT", port))
     batch_size = int(os.getenv("BATCHES", 50))
-    batch_timeout = float(os.getenv("B_TIMEOUT", 1.0)) 
+    batch_timeout = float(os.getenv("B_TIMEOUT", 1.0))
+    status_port = int(os.getenv("ROBOT_STATUS_PORT", 8090))
 
     server = await asyncio.start_server(handle_robot, host=host, port=port)
     sockets = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
     loggers.cur_robot_logger.info(f"[TCP] Listening on {sockets}")
 
     asyncio.create_task(robot_worker(batch_size=batch_size, flush_interval=batch_timeout))
+    asyncio.create_task(start_status_server(status_port))
 
     async with server:
         await server.serve_forever()

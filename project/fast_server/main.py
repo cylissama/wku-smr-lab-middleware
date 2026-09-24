@@ -1,5 +1,7 @@
 import asyncio, os
 
+import aiohttp
+
 from fast_server import loggers
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi_mqtt import FastMQTT, MQTTConfig
@@ -62,6 +64,15 @@ mqtt.init_app(app)
 queue_size = int(os.getenv("QUEUE_SIZE", 5000))
 imu_queue = asyncio.Queue(maxsize=queue_size)
 camera_queue = asyncio.Queue(maxsize=queue_size)
+
+# Items pulled off each queue into the current batch but not yet inserted --
+# Queue.empty() alone misses this window between a worker grabbing a batch
+# and it landing in Postgres. Updated by camera_worker/imu_worker below.
+imu_pending = 0
+camera_pending = 0
+
+# Swarm stacks brought up/down together with each session, via stack-controller
+MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "imu,camera").split(",") if s.strip()]
 
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not
 async def try_backup() -> dict[str, Any]:
@@ -300,6 +311,84 @@ async def get_robot(label: str) -> dict[str, Any]:
 
     return {"error": str(e), "success": False}
 
+# Calls the stack-controller agent to deploy/remove one Swarm stack.
+# Mirrors tcp_server.py's send_to_fastapi() -- same internal-call pattern.
+async def call_stack_controller(action: str, stack: str) -> dict[str, Any]:
+    host = os.getenv("STACK_CONTROLLER_HOST", "stack-controller")
+    port = os.getenv("STACK_CONTROLLER_PORT", "8080")
+    token = os.getenv("STACK_CONTROLLER_TOKEN")
+    url = f"http://{host}:{port}/stacks/{stack}/{action}"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers={"Authorization": f"Bearer {token}"}) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    loggers.log_system_logger(f"stack-controller {action} '{stack}' failed ({resp.status}): {text}", True)
+                    return {"success": False, "error": text}
+                return await resp.json()
+    except Exception as e:
+        loggers.log_system_logger(f"Could not reach stack-controller for {action} '{stack}': {e}", True)
+        return {"success": False, "error": str(e)}
+
+# Deploys every stack in MANAGED_STACKS, returns {stack_name: result}
+async def deploy_managed_stacks() -> dict[str, dict[str, Any]]:
+    results = await asyncio.gather(*(call_stack_controller("deploy", s) for s in MANAGED_STACKS))
+    return dict(zip(MANAGED_STACKS, results))
+
+# Removes every stack in MANAGED_STACKS, returns {stack_name: result}
+async def remove_managed_stacks() -> dict[str, dict[str, Any]]:
+    results = await asyncio.gather(*(call_stack_controller("remove", s) for s in MANAGED_STACKS))
+    return dict(zip(MANAGED_STACKS, results))
+
+# Polls tcp_server's robot queue status over HTTP (it's a separate process/
+# container with its own robot_queue -- fastapi-app has no in-process handle
+# on it). Treated as "not empty" on any failure to reach it, so a drain
+# timeout surfaces as a visible warning instead of a silent false-positive.
+async def get_robot_queue_status() -> dict[str, Any]:
+    host = os.getenv("TCP_HOST", "tcp")
+    port = os.getenv("ROBOT_STATUS_PORT", "8090")
+    url = f"http://{host}:{port}/queue/status"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    return {"empty": False, "error": f"status {resp.status}: {text}"}
+                return await resp.json()
+    except Exception as e:
+        return {"empty": False, "error": str(e)}
+
+# Waits for the IMU/camera in-process batch queues and the robot queue (in the
+# separate tcp_server process) to fully drain after their stacks stop
+# producing, so nothing is left unflushed when the session ends. Checks both
+# queue depth and each worker's in-flight batch ("pending"), since an empty
+# queue doesn't mean the last batch has actually landed in Postgres yet.
+# Returns (drained, names of queues still not empty when it gave up).
+async def drain_queues(timeout: float = 10.0, poll_interval: float = 0.5) -> tuple[bool, list[str]]:
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+
+    while True:
+        robot_status = await get_robot_queue_status()
+
+        remaining = []
+        if not (imu_queue.empty() and imu_pending == 0):
+            remaining.append("imu")
+        if not (camera_queue.empty() and camera_pending == 0):
+            remaining.append("camera")
+        if not robot_status.get("empty", False):
+            remaining.append("robot")
+
+        if not remaining:
+            return True, []
+
+        if loop.time() >= deadline:
+            return False, remaining
+
+        await asyncio.sleep(poll_interval)
+
 # API to start a session
 @app.get("/session/start/{label}")
 async def start_session(label: str, session_label: str, is_test_session: bool = True) -> dict[str, Any]:
@@ -318,6 +407,28 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
         loggers.cur_robot_logger.info(f"Robot session ready with label: {label}")
 
         await broadcast_message(misc_manager, "Session started with logs successfully")
+
+        # Session row exists now, so it's safe to bring the edge-node stacks
+        # online -- their first published messages will have a session to land in.
+        deploy_results = await deploy_managed_stacks()
+        failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
+
+        if failed_stacks:
+            for name in failed_stacks:
+                err = deploy_results[name].get("error")
+                loggers.log_system_logger(f"Failed to deploy '{name}' stack: {err}", True)
+                await broadcast_message(misc_manager, f"Failed to deploy '{name}' stack: {err}", "error")
+
+            # Block: a session with no running stacks won't receive any data, so roll it back.
+            try:
+                await db.end_session()
+            except Exception as rollback_err:
+                loggers.log_system_logger(f"Failed to roll back session after stack deploy failure: {rollback_err}", True)
+
+            return {
+                "error": f"Failed to deploy stack(s): {', '.join(failed_stacks)}",
+                "success": False,
+            }
 
         return {
             "message": f"Session started with label: {label}",
@@ -342,6 +453,24 @@ async def stop_session() -> dict[str, Any]:
   try:
 
     db = app.state.db
+
+    # Stop the edge-node stacks first so no new data arrives, then drain
+    # whatever's still queued in-process before ending the session -- ensures
+    # nothing is left in the buffer when the session (and backup) closes.
+    remove_results = await remove_managed_stacks()
+    failed_stacks = [name for name, result in remove_results.items() if not result.get("success")]
+
+    for name in failed_stacks:
+        err = remove_results[name].get("error")
+        loggers.log_system_logger(f"Failed to remove '{name}' stack: {err}", True)
+        await broadcast_message(misc_manager, f"Failed to remove '{name}' stack: {err}", "error")
+        # Session/backup still proceed below either way -- surfaced as an error, not fatal.
+
+    drained, still_buffered = await drain_queues()
+    if not drained:
+        loggers.log_system_logger(f"Timed out waiting for queue(s) to drain before stopping session: {', '.join(still_buffered)}", True)
+        await broadcast_message(misc_manager, f"Warning: stopping session with data still buffered in: {', '.join(still_buffered)}", "error")
+
     await db.end_session()
 
     loggers.log_system_logger("System session stopped successfully")
@@ -353,7 +482,12 @@ async def stop_session() -> dict[str, Any]:
 
     msg = await try_backup()
 
-    return {"message": f"Current Session Ended", "backup": msg, "success": True}
+    return {
+        "message": f"Current Session Ended",
+        "backup": msg,
+        "success": True,
+        "stack_removal_failed": failed_stacks or None,
+    }
   except Exception as e:
 
     loggers.log_system_logger(f"Failed to stop the current session: {e}", True)
@@ -386,6 +520,8 @@ async def shutdown_event():
 
 # Camera Worker
 async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
+    global camera_pending
+
     db = app.state.db
     batch = []
     last_flush = asyncio.get_event_loop().time()
@@ -400,6 +536,8 @@ async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
         except asyncio.TimeoutError:
             pass
 
+        camera_pending = len(batch)
+
         # If the last flush was a X seconds ago OR the number of messages exceed the batch size, insert them to DB
         now = asyncio.get_event_loop().time()
         if len(batch) >= batch_size or (batch and (now - last_flush) >= flush_interval):
@@ -411,6 +549,7 @@ async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
                 await broadcast_message(camera_manager, f"Inserted {len(batch)} CAMERA rows")
 
                 batch.clear()
+                camera_pending = 0
                 last_flush = now
             except Exception as e:
                 loggers.cur_camera_logger.error(f"CAMERA batch insert failed: {e} {batch[0]}")
@@ -420,6 +559,8 @@ async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
 
 # IMU Worker
 async def imu_worker(batch_size=50, flush_interval=2.0) -> None:
+    global imu_pending
+
     db = app.state.db
     batch = []
     last_flush = asyncio.get_event_loop().time()
@@ -434,6 +575,8 @@ async def imu_worker(batch_size=50, flush_interval=2.0) -> None:
         except asyncio.TimeoutError:
             pass
 
+        imu_pending = len(batch)
+
         # If the last flush was an X seconds ago OR the number of messages exceed the batch size, insert them to DB
         now = asyncio.get_event_loop().time()
         if len(batch) >= batch_size or (batch and (now - last_flush) >= flush_interval):
@@ -445,6 +588,7 @@ async def imu_worker(batch_size=50, flush_interval=2.0) -> None:
                 await broadcast_message(imu_manager, f"Inserted {len(batch)} IMU rows")
 
                 batch.clear()
+                imu_pending = 0
                 last_flush = now
             except Exception as e:
                 loggers.cur_imu_logger.error(f"IMU batch insert failed: {e}")

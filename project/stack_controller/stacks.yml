@@ -1,0 +1,13 @@
+# Whitelist of Swarm stacks this agent is allowed to deploy/remove.
+# Mounted read-only into the container at /config/stacks.yml.
+# compose_file paths are relative to /stacks, which is project/deploy mounted read-only.
+stacks:
+  imu:
+    compose_file: /stacks/swarm-imu-edge-nodes.yml
+    stack_name: imu
+    deploy_flags: ["--resolve-image", "never"]
+
+  camera:
+    compose_file: /stacks/swarm-camera-edge-nodes.yml
+    stack_name: camera
+    deploy_flags: ["--resolve-image", "never"]

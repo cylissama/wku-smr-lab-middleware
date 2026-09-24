@@ -16,6 +16,22 @@
 #
 # Mirrors docker-compose.yml service-for-service; keep the two in sync by hand
 # when changing mqtt-broker/fastapi-app/tcp/web/ntp config.
+#
+# stack-controller (Swarm stack deploy/remove for the IMU/camera edge nodes)
+# needs the local Docker Engine to be a Swarm manager -- a plain Docker
+# Desktop/Engine install isn't one by default. Before bringing this stack up:
+#   docker swarm init
+# One caveat: swarm-imu-edge-nodes.yml pins placement to specific lab
+# hostnames (node.hostname == RPIIMUJ1, ...) and swarm-camera-edge-nodes.yml
+# to node labels (node.labels.camera == front/side) that a single dev-machine
+# swarm won't have, so a real `deploy` will report the stack as created but
+# stuck at 0/1 replicas per service -- expected locally. This still exercises
+# the actual code path end-to-end (start_session/stop_session -> stack-
+# controller -> docker stack deploy/rm/services, and the queue-drain HTTP
+# call to tcp), which is what M4 needs; it just won't schedule real
+# containers unless you also relax the constraints or add a matching label
+# (`docker node update --label-add camera=front $(docker node ls -q)`) for
+# a manual smoke test.
 
 version: "3.9"
 
@@ -80,6 +96,13 @@ services:
       - MQTT_PORT=${MQTT_PORT}
       - ROBOT_TCP_PORT=${ROBOT_TCP_PORT}
       - PGPORT=5432
+      # Stack controller agent
+      - STACK_CONTROLLER_HOST=stack-controller
+      - STACK_CONTROLLER_PORT=8080
+      - STACK_CONTROLLER_TOKEN=${STACK_CONTROLLER_TOKEN}
+      # Robot queue status (tcp_server), polled by drain_queues() on session stop
+      - TCP_HOST=tcp
+      - ROBOT_STATUS_PORT=8090
     ports:
       - "${FASTAPI_PORT}:8000"
     volumes:
@@ -88,6 +111,27 @@ services:
     depends_on:
       - mqtt-broker
       - postgres
+      - stack-controller
+
+  stack-controller:
+    build:
+      context: .
+      dockerfile: stack_controller/Dockerfile
+    container_name: AMS-stack-controller-local
+    env_file:
+      - .env
+    environment:
+      - STACK_CONTROLLER_TOKEN=${STACK_CONTROLLER_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./deploy:/stacks:ro
+      - ./stack_controller/stacks.yml:/config/stacks.yml:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # No published port -- only fastapi-app on the same default network needs to reach it
 
   web:
     build:
@@ -132,8 +176,11 @@ services:
       - QUEUE_SIZE=${QUEUE_SIZE}
       - ROBOT_TCP_PORT=5001
       - HOST_IP=${HOST_IP}
+      - ROBOT_STATUS_PORT=8090
     ports:
       - "${ROBOT_TCP_PORT}:5001"
+    # No published port for ROBOT_STATUS_PORT -- only fastapi-app on the same
+    # default network needs to reach it (see drain_queues() in fast_server/main.py)
     volumes:
       - app_logs_local:/tcp-server/logs
     depends_on:

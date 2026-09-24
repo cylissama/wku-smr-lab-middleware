@@ -37,13 +37,41 @@ services:
       - MQTT_PORT=${MQTT_PORT}
       - ROBOT_TCP_PORT=${ROBOT_TCP_PORT}
       - PGPORT=${PGPORT}
+      # Stack controller agent
+      - STACK_CONTROLLER_HOST=stack-controller
+      - STACK_CONTROLLER_PORT=8080
+      - STACK_CONTROLLER_TOKEN=${STACK_CONTROLLER_TOKEN}
+      # Robot queue status (tcp_server), polled by drain_queues() on session stop
+      - TCP_HOST=tcp
+      - ROBOT_STATUS_PORT=8090
     ports:
       - "${FASTAPI_PORT}:8000"
     volumes:
       - nas_backups:/db_backups
       - logs:/fast_server/logs
-    depends_on:                
+    depends_on:
       - mqtt-broker
+      - stack-controller
+
+  stack-controller:
+    build:
+      context: .
+      dockerfile: stack_controller/Dockerfile
+    container_name: AMS-stack-controller
+    env_file:
+      - .env
+    environment:
+      - STACK_CONTROLLER_TOKEN=${STACK_CONTROLLER_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./deploy:/stacks:ro
+      - ./stack_controller/stacks.yml:/config/stacks.yml:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # No published port -- only fastapi-app on the same default network needs to reach it
 
   web:
       build:
@@ -87,8 +115,11 @@ services:
       - QUEUE_SIZE=${QUEUE_SIZE}
       - ROBOT_TCP_PORT=5001
       - HOST_IP=${HOST_IP}
+      - ROBOT_STATUS_PORT=8090
     ports:
       - "${ROBOT_TCP_PORT}:5001"
+    # No published port for ROBOT_STATUS_PORT -- only fastapi-app on the same
+    # default network needs to reach it (see drain_queues() in fast_server/main.py)
     volumes:
       - logs:/tcp-server/logs
 
