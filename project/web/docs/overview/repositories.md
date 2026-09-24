@@ -19,13 +19,15 @@ AMS includes
 
 Each of these services is explained in detail elsewhere
 
-[IMU Container](https://github.com/cylissama/imu_node_smr)
+---
+
+[IMU Edge Node](https://github.com/cylissama/wku-smr-lab-imu-edge-node)
 
 A revision of the orignal IMU Node code written by Masion and Cing. This code restructures the rpi board controls and data publishing to create a *Swarm* ready architecure.
 
 ---
 
-[Camera Node](https://github.com/mcbuckle/smart-mfg-imu)
+[Camera Edge Node](https://github.com/UmarKhattab09/camera_sensor_fusion)
 
 ---
 

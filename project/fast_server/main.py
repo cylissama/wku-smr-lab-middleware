@@ -24,6 +24,8 @@ def build_allowed_origins() -> list[str]:
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        f"http://localhost:{web_port}",
+        f"http://localhost:{fastapi_port}",
         f"http://{host_ip}",
         f"http://{host_ip}:{web_port}",
         f"http://{host_ip}:3000",
@@ -223,6 +225,20 @@ async def get_sessions() -> dict[str, Any]:
 
     return {"error": str(e), "success": False}
 
+# API to get the registered session label categories, for the start-session dropdown
+@app.get("/session/labels")
+async def get_session_labels() -> dict[str, Any]:
+    try:
+        db = app.state.db
+        data = await db.get_session_labels()
+
+        return {"data": data, "success": True}
+    except Exception as e:
+        loggers.log_system_logger(f"Failed to pull session labels: {e}", True)
+        await broadcast_message(misc_manager, f"Failed to pull session labels: {e}", "error")
+
+        return {"error": str(e), "success": False}
+
 # API to get the current active session if available
 @app.get("/session")
 async def get_running_session() -> dict[str, Any]:
@@ -286,7 +302,7 @@ async def get_robot(label: str) -> dict[str, Any]:
 
 # API to start a session
 @app.get("/session/start/{label}")
-async def start_session(label: str, is_test_session: bool = True) -> dict[str, Any]:
+async def start_session(label: str, session_label: str, is_test_session: bool = True) -> dict[str, Any]:
 
     # Create new logs for this new session only
     loggers.create_loggers()
@@ -294,9 +310,9 @@ async def start_session(label: str, is_test_session: bool = True) -> dict[str, A
     # Prep logs and prepare session id
     try:
         db = app.state.db
-        session_id = await db.create_session(label=label, is_test_session=is_test_session)
+        session_id = await db.create_session(label=label, session_label_name=session_label, is_test_session=is_test_session)
 
-        loggers.log_system_logger(f"System session created with label: {label}")
+        loggers.log_system_logger(f"System session created with label: {label} (type: {session_label})")
         loggers.cur_camera_logger.info(f"Camera session ready with label: {label}")
         loggers.cur_imu_logger.info(f"IMU session ready with label: {label}")
         loggers.cur_robot_logger.info(f"Robot session ready with label: {label}")
