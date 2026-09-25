@@ -7,6 +7,8 @@ project/venv/
 # Environment files
 .env
 project/.env
+.env.*
+!.env.example
 
 # Node modules
 node_modules/

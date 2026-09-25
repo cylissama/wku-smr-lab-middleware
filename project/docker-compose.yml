@@ -1,7 +1,5 @@
 # compose file for the ActiveMiddeleware Services (AMS) stack
 
-version: "3.9"
-
 services:
 
   mqtt-broker:

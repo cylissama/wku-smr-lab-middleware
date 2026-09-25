@@ -10,6 +10,15 @@
 > **Update:** §1, §2, and M4 (§3) are now done -- see the status note at the top
 > of each section below.
 
+> **Update (2026-09-25):** the separate `imu`/`camera` stacks are superseded by a
+> single `edge` stack, `deploy/swarm-edge-nodes.yml` (IMUs 106-110 pinned by
+> hostname `RPIIMUJ1`-`RPIIMUJ5`, cameras by `node.labels.camera` front/side).
+> Its values come from `deploy/.env` (gitignored), which `stack-controller` now
+> loads per deploy via the new `env_file` key in `stack_controller/stacks.yml`.
+> `MANAGED_STACKS=edge`. The Swarm manager moved to the AMS host (`IIoT`,
+> `192.168.2.100`); the camera hosts are `RPiCamFront` (`192.168.1.113`) and
+> `CameraPi2` (`192.168.1.114`), not `.80`/`.92` as noted in §2 below.
+
 ---
 
 ## 1. Fix needed: robot queue has no visibility before a session stops (P0)

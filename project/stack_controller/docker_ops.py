@@ -1,12 +1,18 @@
+import os
 import subprocess
 
 import docker
 from docker.errors import APIError, DockerException
 
 
-def deploy_stack(compose_file: str, stack_name: str, extra_flags: list[str]) -> subprocess.CompletedProcess:
+# stack_env is layered over this process's environment, since `docker stack
+# deploy` interpolates ${VAR}s in the compose file from its own environment.
+def deploy_stack(
+    compose_file: str, stack_name: str, extra_flags: list[str], stack_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     cmd = ["docker", "stack", "deploy", *extra_flags, "-c", compose_file, stack_name]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    env = {**os.environ, **(stack_env or {})}
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
 
 def remove_stack(stack_name: str) -> subprocess.CompletedProcess:

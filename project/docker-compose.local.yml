@@ -33,8 +33,6 @@
 # (`docker node update --label-add camera=front $(docker node ls -q)`) for
 # a manual smoke test.
 
-version: "3.9"
-
 services:
 
   mqtt-broker:

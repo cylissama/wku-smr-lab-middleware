@@ -72,7 +72,7 @@ imu_pending = 0
 camera_pending = 0
 
 # Swarm stacks brought up/down together with each session, via stack-controller
-MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "imu,camera").split(",") if s.strip()]
+MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "edge").split(",") if s.strip()]
 
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not
 async def try_backup() -> dict[str, Any]:

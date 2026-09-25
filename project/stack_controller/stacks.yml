@@ -1,13 +1,16 @@
 # Whitelist of Swarm stacks this agent is allowed to deploy/remove.
 # Mounted read-only into the container at /config/stacks.yml.
-# compose_file paths are relative to /stacks, which is project/deploy mounted read-only.
+# Paths are inside the container: /stacks is project/deploy mounted read-only.
+#
+# env_file (optional) is read fresh on every deploy and layered over the
+# container's environment, since `docker stack deploy` interpolates ${VAR}s
+# in compose_file from its own environment.
 stacks:
-  imu:
-    compose_file: /stacks/swarm-imu-edge-nodes.yml
-    stack_name: imu
-    deploy_flags: ["--resolve-image", "never"]
-
-  camera:
-    compose_file: /stacks/swarm-camera-edge-nodes.yml
-    stack_name: camera
+  # All edge nodes (IMUs + cameras) in one stack. Supersedes the old separate
+  # imu/camera entries -- don't whitelist those alongside this one, they pin
+  # the same services to the same nodes.
+  edge:
+    compose_file: /stacks/swarm-edge-nodes.yml
+    env_file: /stacks/.env
+    stack_name: edge
     deploy_flags: ["--resolve-image", "never"]

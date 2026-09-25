@@ -1,0 +1,291 @@
+# Swarm stack config for the edge nodes (IMUs + cameras).
+#
+# Every variable reference below is interpolated by `docker stack deploy` from the
+# calling process's environment, sourced from .env in this directory.
+# stack-controller loads that file itself (see env_file in
+# stack_controller/stacks.yml). To deploy by hand from project/deploy/:
+#
+#   set -a; source ./.env; set +a
+#   docker stack deploy --resolve-image never -c swarm-edge-nodes.yml edge
+#
+# Don't regenerate this file through an unquoted heredoc (cat <<EOF) or
+# envsubst -- the shell expands the variable references to empty strings.
+
+services:
+
+  # --- IMU edge nodes (pinned by hostname) ---
+
+  imu-106:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: [python3, -m, imu_edge]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == ${IMU_106_HOSTNAME}
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "${IMU_106_DEVICE_ID}"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-${IMU_106_DEVICE_ID}
+      IMU_SAMPLE_HZ: "${IMU_SAMPLE_HZ}"
+      IMU_REQUEST_TARE: "${IMU_REQUEST_TARE}"
+      IMU_RESET_COUNTER: "${IMU_RESET_COUNTER}"
+      IMU_AUTO_START_SESSION: "${IMU_AUTO_START_SESSION}"
+      IMU_STOP_SESSION_ON_EXIT: "${IMU_STOP_SESSION_ON_EXIT}"
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      MQTT_BROKER_PORT: "${MQTT_BROKER_PORT}"
+      MQTT_CLIENT_ID: "${IMU_106_DEVICE_ID}"
+      MQTT_TOPIC: imu/${IMU_106_DEVICE_ID}
+      IMU_CSV_PATH: /app/data/imu-${IMU_106_DEVICE_ID}.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_106_DEVICE_ID}.json
+    healthcheck:
+      test: [CMD, python3, -m, imu_edge, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-107:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: [python3, -m, imu_edge]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == ${IMU_107_HOSTNAME}
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "${IMU_107_DEVICE_ID}"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-${IMU_107_DEVICE_ID}
+      IMU_SAMPLE_HZ: "${IMU_SAMPLE_HZ}"
+      IMU_REQUEST_TARE: "${IMU_REQUEST_TARE}"
+      IMU_RESET_COUNTER: "${IMU_RESET_COUNTER}"
+      IMU_AUTO_START_SESSION: "${IMU_AUTO_START_SESSION}"
+      IMU_STOP_SESSION_ON_EXIT: "${IMU_STOP_SESSION_ON_EXIT}"
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      MQTT_BROKER_PORT: "${MQTT_BROKER_PORT}"
+      MQTT_CLIENT_ID: "${IMU_107_DEVICE_ID}"
+      MQTT_TOPIC: imu/${IMU_107_DEVICE_ID}
+      IMU_CSV_PATH: /app/data/imu-${IMU_107_DEVICE_ID}.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_107_DEVICE_ID}.json
+    healthcheck:
+      test: [CMD, python3, -m, imu_edge, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-108:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: [python3, -m, imu_edge]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == ${IMU_108_HOSTNAME}
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "${IMU_108_DEVICE_ID}"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-${IMU_108_DEVICE_ID}
+      IMU_SAMPLE_HZ: "${IMU_SAMPLE_HZ}"
+      IMU_REQUEST_TARE: "${IMU_REQUEST_TARE}"
+      IMU_RESET_COUNTER: "${IMU_RESET_COUNTER}"
+      IMU_AUTO_START_SESSION: "${IMU_AUTO_START_SESSION}"
+      IMU_STOP_SESSION_ON_EXIT: "${IMU_STOP_SESSION_ON_EXIT}"
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      MQTT_BROKER_PORT: "${MQTT_BROKER_PORT}"
+      MQTT_CLIENT_ID: "${IMU_108_DEVICE_ID}"
+      MQTT_TOPIC: imu/${IMU_108_DEVICE_ID}
+      IMU_CSV_PATH: /app/data/imu-${IMU_108_DEVICE_ID}.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_108_DEVICE_ID}.json
+    healthcheck:
+      test: [CMD, python3, -m, imu_edge, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-109:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: [python3, -m, imu_edge]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == ${IMU_109_HOSTNAME}
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "${IMU_109_DEVICE_ID}"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-${IMU_109_DEVICE_ID}
+      IMU_SAMPLE_HZ: "${IMU_SAMPLE_HZ}"
+      IMU_REQUEST_TARE: "${IMU_REQUEST_TARE}"
+      IMU_RESET_COUNTER: "${IMU_RESET_COUNTER}"
+      IMU_AUTO_START_SESSION: "${IMU_AUTO_START_SESSION}"
+      IMU_STOP_SESSION_ON_EXIT: "${IMU_STOP_SESSION_ON_EXIT}"
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      MQTT_BROKER_PORT: "${MQTT_BROKER_PORT}"
+      MQTT_CLIENT_ID: "${IMU_109_DEVICE_ID}"
+      MQTT_TOPIC: imu/${IMU_109_DEVICE_ID}
+      IMU_CSV_PATH: /app/data/imu-${IMU_109_DEVICE_ID}.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_109_DEVICE_ID}.json
+    healthcheck:
+      test: [CMD, python3, -m, imu_edge, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  imu-110:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: [python3, -m, imu_edge]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.hostname == ${IMU_110_HOSTNAME}
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "${IMU_110_DEVICE_ID}"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-${IMU_110_DEVICE_ID}
+      IMU_SAMPLE_HZ: "${IMU_SAMPLE_HZ}"
+      IMU_REQUEST_TARE: "${IMU_REQUEST_TARE}"
+      IMU_RESET_COUNTER: "${IMU_RESET_COUNTER}"
+      IMU_AUTO_START_SESSION: "${IMU_AUTO_START_SESSION}"
+      IMU_STOP_SESSION_ON_EXIT: "${IMU_STOP_SESSION_ON_EXIT}"
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      MQTT_BROKER_PORT: "${MQTT_BROKER_PORT}"
+      MQTT_CLIENT_ID: "${IMU_110_DEVICE_ID}"
+      MQTT_TOPIC: imu/${IMU_110_DEVICE_ID}
+      IMU_CSV_PATH: /app/data/imu-${IMU_110_DEVICE_ID}.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_110_DEVICE_ID}.json
+    healthcheck:
+      test: [CMD, python3, -m, imu_edge, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # --- Camera edge nodes (pinned by node.labels.camera) ---
+
+  camera-front:
+    image: camera-edge:latest
+
+    environment:
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      DEVICE_ID: "${CAMERA_FRONT_DEVICE_ID}"
+      CAMERA_NAME: ${CAMERA_FRONT_NAME}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_FRONT_CALIBRATION_PATH}
+      CAMERA_MARKER_LENGTH_M: "${CAMERA_MARKER_LENGTH_M}"
+      CAMERA_EDGE_HEALTH_PATH: /tmp/camera-edge-health.json
+
+    deploy:
+      replicas: 1
+
+      restart_policy:
+        condition: any
+
+      placement:
+        constraints:
+          - node.labels.camera == front
+
+    volumes:
+      - type: bind
+        source: /run/camera-hw
+        target: /run/camera-hw
+
+      - type: bind
+        source: /opt/camera-sensor-fusion/data
+        target: /app/data
+
+    healthcheck:
+      test: [CMD, python3, -m, camera_edge, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+
+  camera-side:
+    image: camera-edge:latest
+
+    environment:
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      DEVICE_ID: "${CAMERA_SIDE_DEVICE_ID}"
+      CAMERA_NAME: ${CAMERA_SIDE_NAME}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_SIDE_CALIBRATION_PATH}
+      CAMERA_MARKER_LENGTH_M: "${CAMERA_MARKER_LENGTH_M}"
+      CAMERA_EDGE_HEALTH_PATH: /tmp/camera-edge-health.json
+
+    deploy:
+      replicas: 1
+
+      restart_policy:
+        condition: any
+
+      placement:
+        constraints:
+          - node.labels.camera == side
+
+    volumes:
+      - type: bind
+        source: /run/camera-hw
+        target: /run/camera-hw
+
+      - type: bind
+        source: /opt/camera-sensor-fusion/data
+        target: /app/data
+
+    healthcheck:
+      test: [CMD, python3, -m, camera_edge, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
