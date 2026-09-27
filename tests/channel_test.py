@@ -1,6 +1,6 @@
 import unittest
 from fastapi import HTTPException
-from project.fast_server.main import send_channel, MANAGERS
+from fast_server.main import send_channel, MANAGERS
 
 class FakeManager:
 

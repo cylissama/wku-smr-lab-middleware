@@ -10,7 +10,7 @@
 # local Docker volumes for backups/logs, so the full stack comes up on any
 # machine with nothing but Docker and a `.env` file (see .env.example).
 #
-# Usage (from project/):
+# Usage (from the repo root):
 #   docker compose -f docker-compose.local.yml up -d --build
 #   docker compose -f docker-compose.local.yml down
 #

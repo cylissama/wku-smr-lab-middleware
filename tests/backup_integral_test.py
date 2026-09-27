@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from fastapi.testclient import TestClient
-from project.fast_server.main import app
+from fast_server.main import app
 
 class BackupIntegrationTests(unittest.TestCase):
 
@@ -18,10 +18,10 @@ class BackupIntegrationTests(unittest.TestCase):
         app.state.db = fake_db
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast, patch(
-            "project.fast_server.main.log_system_logger"
+            "fast_server.main.log_system_logger"
         ) as mock_log:
 
             resp = self.client.get("/backup")
@@ -48,10 +48,10 @@ class BackupIntegrationTests(unittest.TestCase):
         app.state.db = fake_db
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast, patch(
-            "project.fast_server.main.log_system_logger"
+            "fast_server.main.log_system_logger"
         ) as mock_log:
             resp = self.client.get("/backup")
 
@@ -73,10 +73,10 @@ class BackupIntegrationTests(unittest.TestCase):
         filename = "test.sql"
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast, patch(
-            "project.fast_server.main.log_system_logger"
+            "fast_server.main.log_system_logger"
         ) as mock_log:
             resp = self.client.post(f"/backup/restore/{filename}")
 
@@ -102,10 +102,10 @@ class BackupIntegrationTests(unittest.TestCase):
         filename = "test.sql"
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast, patch(
-            "project.fast_server.main.log_system_logger"
+            "fast_server.main.log_system_logger"
         ) as mock_log:
             resp = self.client.post(f"/backup/restore/{filename}")
 

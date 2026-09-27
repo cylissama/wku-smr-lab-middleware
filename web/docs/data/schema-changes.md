@@ -1,6 +1,6 @@
 # Updating the production database schema
 
-There is no migration tool for this project — schema changes are hand-run SQL against the NAS-hosted Postgres instance, logged chronologically in [`db/migrations.md`](https://github.com/cylissama/wku-smr-lab-middleware/blob/main/project/db/migrations.md). `db/schema.sql` is a from-scratch equivalent of the same schema, kept in sync so a fresh local/portable stack (see [Compose](/docker/compose)) matches production without needing the NAS.
+There is no migration tool for this project — schema changes are hand-run SQL against the NAS-hosted Postgres instance, logged chronologically in [`db/migrations.md`](https://github.com/cylissama/wku-smr-lab-middleware/blob/main/db/migrations.md). `db/schema.sql` is a from-scratch equivalent of the same schema, kept in sync so a fresh local/portable stack (see [Compose](/docker/compose)) matches production without needing the NAS.
 
 Two patterns cover almost every change made so far: adding a column to an existing table, and adding a whole new table linked to an existing one by foreign key.
 
@@ -64,7 +64,6 @@ Used for things like adding a new sensor field to `imu_measurement`, `image_dete
 4. **Rebuild and restart.** On the Data Broker Mini PC:
 
    ```bash
-   cd project
    docker compose down
    docker compose up --build -d
    ```

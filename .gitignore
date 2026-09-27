@@ -1,12 +1,10 @@
 # Python virtual environments
 venv/
 .venv/
-project/fast_server/venv/
-project/venv/
+fast_server/venv/
 
 # Environment files
 .env
-project/.env
 
 # Node modules
 node_modules/

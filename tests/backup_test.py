@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from project.fast_server.main import try_backup, app, restore_backup
+from fast_server.main import try_backup, app, restore_backup
 
 
 class BackupTests(unittest.IsolatedAsyncioTestCase):
@@ -16,7 +16,7 @@ class BackupTests(unittest.IsolatedAsyncioTestCase):
         filename = "test.sql"
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast:
             result = await restore_backup(filename)
@@ -42,10 +42,10 @@ class BackupTests(unittest.IsolatedAsyncioTestCase):
         filename = "test.sql"
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast, patch(
-            "project.fast_server.main.log_system_logger"
+            "fast_server.main.log_system_logger"
         ) as mock_log:
             result = await restore_backup(filename)
 
@@ -66,7 +66,7 @@ class BackupTests(unittest.IsolatedAsyncioTestCase):
         fake_db.create_backup.return_value = "/db_backups/test.sql"
         app.state.db = fake_db
 
-        with patch("project.fast_server.main.broadcast_message", new_callable=AsyncMock) as mock_broadcast:
+        with patch("fast_server.main.broadcast_message", new_callable=AsyncMock) as mock_broadcast:
             result = await try_backup()
 
         self.assertEqual(result, {
@@ -93,7 +93,7 @@ class BackupTests(unittest.IsolatedAsyncioTestCase):
         fake_db.create_backup.side_effect = boom
         app.state.db = fake_db
 
-        with patch("project.fast_server.main.broadcast_message", new_callable=AsyncMock) as mock_broadcast:
+        with patch("fast_server.main.broadcast_message", new_callable=AsyncMock) as mock_broadcast:
             result = await try_backup()
 
         self.assertEqual(result["success"], False)

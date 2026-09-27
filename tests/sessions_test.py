@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from project.fast_server.main import app, get_sessions
+from fast_server.main import app, get_sessions
 
 class GetSessionsTests(unittest.IsolatedAsyncioTestCase):
 
@@ -13,9 +13,9 @@ class GetSessionsTests(unittest.IsolatedAsyncioTestCase):
         app.state.db = fake_db
 
         with patch(
-            "project.fast_server.main.log_system_logger"
+            "fast_server.main.log_system_logger"
         ) as mock_log, patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast:
             result = await get_sessions()
@@ -38,9 +38,9 @@ class GetSessionsTests(unittest.IsolatedAsyncioTestCase):
         app.state.db = fake_db
 
         with patch(
-            "project.fast_server.main.log_system_logger"
+            "fast_server.main.log_system_logger"
         ) as mock_log, patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast:
             result = await get_sessions()

@@ -1,6 +1,6 @@
 import unittest
 
-from project.fast_server.parsing import parse_camera_message, parse_imu_message
+from fast_server.parsing import parse_camera_message, parse_imu_message
 
 
 class ParsingTests(unittest.TestCase):

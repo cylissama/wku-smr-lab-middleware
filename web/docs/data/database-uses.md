@@ -41,6 +41,6 @@ Both are tunable via `.env` (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`). This keeps i
 
 ## Changing the schema
 
-Because parsing, database inserts, and table columns all have to agree on field order, schema changes follow a fixed sequence — see [Updating the production database schema](/data/schema-changes) for the full walkthrough (adding a column, and adding a new linked table), and `project/db/migrations.md` for the change history.
+Because parsing, database inserts, and table columns all have to agree on field order, schema changes follow a fixed sequence — see [Updating the production database schema](/data/schema-changes) for the full walkthrough (adding a column, and adding a new linked table), and `db/migrations.md` for the change history.
 
 See [Database structure](/data/database-structure) for the current table layout.

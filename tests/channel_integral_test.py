@@ -2,7 +2,7 @@
 import unittest
 from fastapi.testclient import TestClient
 
-from project.fast_server.main import app, MANAGERS
+from fast_server.main import app, MANAGERS
 
 class FakeManager:
     def __init__(self):

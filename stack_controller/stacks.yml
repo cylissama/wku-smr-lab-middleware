@@ -1,6 +1,6 @@
 # Whitelist of Swarm stacks this agent is allowed to deploy/remove.
 # Mounted read-only into the container at /config/stacks.yml.
-# compose_file paths are relative to /stacks, which is project/deploy mounted read-only.
+# compose_file paths are relative to /stacks, which is deploy/ mounted read-only.
 stacks:
   imu:
     compose_file: /stacks/swarm-imu-edge-nodes.yml
