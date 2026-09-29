@@ -1,0 +1,213 @@
+# compose file for the ActiveMiddeleware Services (AMS) stack
+
+services:
+
+  mqtt-broker:
+    image: eclipse-mosquitto:2
+    container_name: AMS-mqtt-broker
+    ports:
+      - "${MQTT_PORT}:1883"
+      - "9001:9001"
+    volumes:
+      - ./mqtt_conf:/mosquitto/config
+
+  fastapi-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: AMS-fastapi
+    env_file:
+      - .env
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - NTP_SERVER=ntp
+      # IPs
+      - PGHOST=${DB_HOST}
+      # Database Login Info
+      - PGUSER=${DB_USER}
+      - PGPASSWORD=${DB_PASSWORD}
+      - PGDATABASE=${DB_NAME}
+      # Batched Config
+      - QUEUE_SIZE=${QUEUE_SIZE}
+      - B_TIMEOUT=${B_TIMEOUT}
+      - BATCHES=${BATCHES}
+      # Ports
+      - MQTT_PORT=${MQTT_PORT}
+      - ROBOT_TCP_PORT=${ROBOT_TCP_PORT}
+      - PGPORT=${PGPORT}
+      # Stack controller agent
+      - STACK_CONTROLLER_HOST=stack-controller
+      - STACK_CONTROLLER_PORT=8080
+      - STACK_CONTROLLER_TOKEN=${STACK_CONTROLLER_TOKEN}
+      # Robot queue status (tcp_server), polled by drain_queues() on session stop
+      - TCP_HOST=tcp
+      - ROBOT_STATUS_PORT=8090
+    ports:
+      - "${FASTAPI_PORT}:8000"
+    volumes:
+      - nas_backups:/db_backups
+      - logs:/fast_server/logs
+    depends_on:
+      - mqtt-broker
+      - stack-controller
+
+  stack-controller:
+    build:
+      context: .
+      dockerfile: stack_controller/Dockerfile
+    container_name: AMS-stack-controller
+    env_file:
+      - .env
+    environment:
+      - STACK_CONTROLLER_TOKEN=${STACK_CONTROLLER_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./deploy:/stacks:ro
+      - ./stack_controller/stacks.yml:/config/stacks.yml:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # No published port -- only fastapi-app on the same default network needs to reach it
+
+  web:
+      build:
+        context: ./web
+        args:
+          HOST_IP: ${HOST_IP}
+          FASTAPI_PORT: ${FASTAPI_PORT}
+          VITE_API_URL: ${VITE_API_URL:-}
+          VITE_WS_URL: ${VITE_WS_URL:-}
+          VITE_AI_URL: ${VITE_AI_URL:-}
+          VITE_TWINS_URL: ${VITE_TWINS_URL:-}
+          VITE_ROBOT_CAMERA_URL: ${VITE_ROBOT_CAMERA_URL:-}
+          VITE_DB_GUI_URL: ${VITE_DB_GUI_URL:-}
+          VITE_PORTAINER_URL: ${VITE_PORTAINER_URL:-}
+          ROBOT_CAMERA_URL: ${ROBOT_CAMERA_URL:-}
+          DB_GUI_URL: ${DB_GUI_URL:-http://${HOST_IP}:${PGADMIN_PORT:-5050}}
+          PORTAINER_URL: ${PORTAINER_URL:-}
+      container_name: AMS-dashboard-docs
+      ports:
+        - "${WEB_PORT}:80"
+      depends_on:
+        - fastapi-app
+
+  tcp:
+    build:
+      context: .            
+      dockerfile: tcp_server/dockerfile
+
+    container_name: AMS-tcp-listener
+    env_file:
+      - .env
+    environment:
+      - PGHOST=${DB_HOST}
+      - NTP_SERVER=ntp
+      - PGPORT=5433
+      - PGUSER=${DB_USER}
+      - PGPASSWORD=${DB_PASSWORD}
+      - PGDATABASE=${DB_NAME}
+      - BATCHES=${BATCHES}
+      - B_TIMEOUT=${B_TIMEOUT}
+      - QUEUE_SIZE=${QUEUE_SIZE}
+      - ROBOT_TCP_PORT=5001
+      - HOST_IP=${HOST_IP}
+      - ROBOT_STATUS_PORT=8090
+    ports:
+      - "${ROBOT_TCP_PORT}:5001"
+    # No published port for ROBOT_STATUS_PORT -- only fastapi-app on the same
+    # default network needs to reach it (see drain_queues() in fast_server/main.py)
+    volumes:
+      - logs:/tcp-server/logs
+
+  ntp:
+    image: cturra/ntp:latest
+    container_name: AMS-ntp
+    restart: unless-stopped
+    ports:
+      - "${NTP_PORT}:123/udp"
+    environment:
+      - TZ=America/Chicago
+      - NTP_SERVERS="time1.google.com,time2.google.com,time3.google.com,time4.google.com"
+    cap_add:
+      - SYS_NICE
+      - SYS_TIME
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+
+  # --- Optional local database, for replicating the stack outside the lab ---
+  # The lab deployment points DB_HOST at the NAS-hosted Postgres instance, which
+  # isn't reachable from a laptop or CI box. Bring this up alongside the
+  # rest of the stack with `docker compose --profile local-db up -d` and set
+  # DB_HOST=postgres / DB_PORT=5432 in .env to use it instead of the NAS.
+  # Note: nas_backups/logs below are still NFS-mounted to the NAS regardless of
+  # this profile — for a fully NAS-free run, use docker-compose.local.yml instead.
+  postgres:
+    image: postgres:16-alpine
+    container_name: AMS-postgres
+    profiles:
+      - local-db
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+
+  # --- pgAdmin (always on) ---
+  # Multi-user pgAdmin for the lab, replacing the old instance on the NAS. Runs in
+  # server mode: every student gets their own pgAdmin login (and their own
+  # Postgres role), so saved servers, query history and open connections are
+  # isolated per person. Accounts are created with pgadmin/provision-users.sh,
+  # see web/docs/data/accessing-database.md. It talks to whatever DB_HOST points
+  # at, so it works against the NAS Postgres or the local-db profile's postgres.
+  pgadmin:
+    image: dpage/pgadmin4:9
+    container_name: AMS-pgadmin
+    restart: unless-stopped
+    environment:
+      # Initial admin account, only applied on first start against an empty
+      # pgadmin_data volume; change it from the UI afterwards
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=True
+      # Performance: pgAdmin can only run one gunicorn worker, so concurrency
+      # comes from threads (image default 25). Skip the startup upgrade check,
+      # the per-request access log and the bundled postfix (no mail relay here).
+      - GUNICORN_THREADS=${PGADMIN_THREADS:-50}
+      - GUNICORN_ACCESS_LOGFILE=/dev/null
+      - PGADMIN_CONFIG_UPGRADE_CHECK_ENABLED=False
+      - PGADMIN_CONFIG_CONSOLE_LOG_LEVEL=30
+      - PGADMIN_DISABLE_POSTFIX=true
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      # Local Docker volume, deliberately NOT an NFS mount: pgAdmin keeps its
+      # users/servers/query history in SQLite, which is slow and lock-prone on NFS
+      - pgadmin_data:/var/lib/pgadmin
+    # No cpus/mem_limit on purpose -- this host has headroom and pgAdmin should
+    # never be the thing that throttles a student's query
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/misc/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  chrony-state:
+  postgres_data:
+  pgadmin_data:
+  nas_backups:
+    driver_opts:
+      type: "nfs"
+      o: "addr=${DB_HOST},nolock,soft,rw"
+      device: ":/volume1/docker/postgres/backups"
+  logs:
+    driver_opts:
+      type: "nfs"
+      o: "addr=${DB_HOST},nolock,soft,rw"
+      device: ":/volume1/docker/postgres/logs"

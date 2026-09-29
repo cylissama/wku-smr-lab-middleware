@@ -1,12 +1,12 @@
 # Python virtual environments
 venv/
 .venv/
-project/fast_server/venv/
-project/venv/
+fast_server/venv/
 
 # Environment files
 .env
-project/.env
+.env.*
+!.env.example
 
 # Node modules
 node_modules/
@@ -26,3 +26,10 @@ __pycache__/
 # Common editor/system files
 .vscode/
 .idea/
+
+# pgAdmin provisioning: real roster and generated credentials/SQL
+pgadmin/users.csv
+pgadmin/generated/
+
+# Lab account logins (real passwords, never commit)
+.accounts

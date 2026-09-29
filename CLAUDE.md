@@ -4,35 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A smart manufacturing data platform (WKU SMR Lab) that ingests telemetry from distributed edge devices (IMUs, cameras, robot arm) over MQTT and TCP, stores it in PostgreSQL, and exposes a live dashboard. All backend code lives under `project/`.
+A smart manufacturing data platform (WKU SMR Lab) that ingests telemetry from distributed edge devices (IMUs, cameras, robot arm) over MQTT and TCP, stores it in PostgreSQL, and exposes a live dashboard.
 
 ## Repository layout
 
 ```text
-project/
-├── db/                    # asyncpg pool + all database read/write logic (shared by fastapi-app and tcp)
-│   ├── database.py        # DatabaseSingleton — one pool per container
-│   ├── schema.sql         # from-scratch schema for local/portable Postgres, kept in sync with migrations.md
-│   └── migrations.md      # hand-applied SQL migration log (no migration tool)
-├── fast_server/           # FastAPI app: HTTP + WebSocket + MQTT ingestion
-│   ├── main.py            # routes, MQTT subscriptions, batch workers, startup/shutdown
-│   ├── parsing.py         # MQTT payload → dict parsing for imu/camera topics
-│   ├── connection_manager.py  # WebSocket broadcast managers (camera/imu/robot/misc)
-│   └── loggers.py
-├── tcp_server/tcp_server.py   # raw asyncio TCP listener for robot telemetry (own process/container)
-├── mqtt_conf/mosquitto.conf   # Mosquitto broker config
-├── tests/                 # unittest-based tests, run as a package from repo root (see below)
-├── deploy/                # standalone Swarm/Portainer stack manifests for the edge-node cluster
-├── docker-compose.yml     # the always-on broker stack (single host: mqtt, fastapi, tcp, web, ntp)
-├── Dockerfile             # fastapi-app image
-└── web/                   # React + Vite dashboard AND a separate VitePress docs site
-    ├── src/                # dashboard SPA (sessions, device status, message streams, backups)
-    ├── public/info/        # SOP/diagram files served in-app, indexed by a generated manifest.json
-    ├── docs/               # VitePress reference docs, built separately, served under /docs/
-    └── nginx.conf          # serves the SPA, proxies /api/ to fastapi-app, serves /docs/
+db/                    # asyncpg pool + all database read/write logic (shared by fastapi-app and tcp)
+├── database.py        # DatabaseSingleton — one pool per container
+├── schema.sql         # from-scratch schema for local/portable Postgres, kept in sync with migrations.md
+└── migrations.md      # hand-applied SQL migration log (no migration tool)
+fast_server/           # FastAPI app: HTTP + WebSocket + MQTT ingestion
+├── main.py            # routes, MQTT subscriptions, batch workers, startup/shutdown
+├── parsing.py         # MQTT payload → dict parsing for imu/camera topics
+├── connection_manager.py  # WebSocket broadcast managers (camera/imu/robot/misc)
+└── loggers.py
+tcp_server/tcp_server.py   # raw asyncio TCP listener for robot telemetry (own process/container)
+mqtt_conf/mosquitto.conf   # Mosquitto broker config
+tests/                 # unittest-based tests, run as a package from repo root (see below)
+deploy/                # standalone Swarm/Portainer stack manifests for the edge-node cluster
+docker-compose.yml     # the always-on broker stack (single host: mqtt, fastapi, tcp, web, ntp, pgadmin)
+pgadmin/               # provision-users.sh: per-person pgAdmin accounts + admin/viewer Postgres roles
+Dockerfile             # fastapi-app image
+web/                   # React + Vite dashboard AND a separate VitePress docs site
+├── src/                # dashboard SPA (sessions, device status, message streams, backups)
+├── public/info/        # SOP/diagram files served in-app, indexed by a generated manifest.json
+├── docs/               # VitePress reference docs, built separately, served under /docs/
+└── nginx.conf          # serves the SPA, proxies /api/ to fastapi-app, serves /docs/
 ```
 
-For a deeper walkthrough with data-flow diagrams, read `project/web/docs/overview/structure.md` — it's kept current and is the best single orientation doc in the repo.
+For a deeper walkthrough with data-flow diagrams, read `web/docs/overview/structure.md` — it's kept current and is the best single orientation doc in the repo.
 
 ## Architecture
 
@@ -41,23 +41,24 @@ For a deeper walkthrough with data-flow diagrams, read `project/web/docs/overvie
 - **Sessions gate everything.** All data is scoped to a session row (`session` table); `get_latest_session()` caches the current session id for ~10s to avoid hammering the DB. Starting/stopping a session also rotates the file loggers (`loggers.create_loggers()`) and triggers an automatic DB backup on stop.
 - **Live updates** flow to the dashboard over four separate WebSocket channels (`/ws/camera`, `/ws/imu`, `/ws/robot`, `/ws/misc`), each backed by a `ConnectionManager` in `connection_manager.py`. `POST /send/{channel}` lets any service (including the standalone TCP process) push a message onto one of these channels.
 - **Backups** are `pg_dump`/`pg_restore` shelled out from `DatabaseSingleton` to an NFS-mounted volume (`/db_backups`), not a Postgres extension or managed service. Restoring drops and recreates the database, then reopens the pool — it is destructive and only intended for lab recovery workflows.
-- **Two deployment surfaces**: the always-on broker stack (`project/docker-compose.yml`, one host: mqtt broker, fastapi, tcp, web, ntp) and the IMU edge cluster (`project/deploy/swarm-imu-edge-nodes.yml`, a Docker Swarm across several Raspberry Pis, one per physical IMU via node labels). Related device-node repos (IMU, camera) are separate GitHub repos — see `REPOS.MD`.
-- **`project/web` builds two independent frontends** served by the same nginx container: the operational dashboard SPA (`src/`) and the VitePress docs site (`docs/`), built with separate `npm run build` / `npm run docs:build` commands and mounted at `/` and `/docs/` respectively by `nginx.conf`.
-- **No schema migration tool.** Schema changes are hand-run SQL logged chronologically in `project/db/migrations.md`. When changing table shape, add an entry there and update the SQL in `db/database.py` together.
+- **pgAdmin runs in the broker stack**, not on the NAS: an always-on `pgadmin` service in server mode with one account per person, each tied to their own Postgres login role in one of two groups: `lab_viewers` (students: read-only, per-role `statement_timeout`/connection limits, restricted `Viewer` pgAdmin role) or `lab_admins` (full access via inherited `DB_USER` rights with `SET FALSE`, so not superuser). Accounts are created by `pgadmin/provision-users.sh`; its data volume is deliberately local, not NFS.
+- **Two deployment surfaces**: the always-on broker stack (`docker-compose.yml`, one host: mqtt broker, fastapi, tcp, web, ntp, pgadmin) and the IMU edge cluster (`deploy/swarm-imu-edge-nodes.yml`, a Docker Swarm across several Raspberry Pis, one per physical IMU via node labels). Related device-node repos (IMU, camera) are separate GitHub repos — see `REPOS.MD`.
+- **`web/` builds two independent frontends** served by the same nginx container: the operational dashboard SPA (`src/`) and the VitePress docs site (`docs/`), built with separate `npm run build` / `npm run docs:build` commands and mounted at `/` and `/docs/` respectively by `nginx.conf`.
+- **No schema migration tool.** Schema changes are hand-run SQL logged chronologically in `db/migrations.md`. When changing table shape, add an entry there and update the SQL in `db/database.py` together.
 
 ## Commands
 
-All backend commands assume Python 3.13 with `pip install -r project/requirements.txt`.
+All backend commands assume Python 3.13 with `pip install -r requirements.txt`.
 
 ### Backend tests
-Tests import as `project.fast_server...`, so run them from the **repository root** (not from inside `project/`):
+Tests import modules directly from the repo root (`fast_server`, `db`, etc.), so run them from the **repository root**:
 ```bash
-python -m unittest project.tests.sessions_test
-python -m unittest discover -s project/tests -t .
+python -m unittest tests.sessions_test
+python -m unittest discover -s tests -t .
 ```
 Tests are split into unit tests (mock the DB/managers, e.g. `channel_test.py`) and "integral" tests that exercise the FastAPI app via `TestClient` (e.g. `channel_integral_test.py`). There is no pytest config; plain `unittest` is used throughout.
 
-### Frontend (`project/web`)
+### Frontend (`web/`)
 ```bash
 npm install
 npm run dev             # Vite dev server
@@ -69,14 +70,14 @@ npm run docs:build
 
 ### Full stack (Docker)
 ```bash
-docker compose -f project/docker-compose.yml up -d
+docker compose up -d
 ```
-Requires a `.env` file next to `docker-compose.yml` (not committed, see `project/.env.example`) providing `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `MQTT_PORT`, `FASTAPI_PORT`, `WEB_PORT`, `ROBOT_TCP_PORT`, `NTP_PORT`, `HOST_IP`, `QUEUE_SIZE`, `BATCHES`, `B_TIMEOUT`, and the `VITE_*`/`*_URL` build args consumed by `web/dockerfile`.
+Requires a `.env` file next to `docker-compose.yml` (not committed, see `.env.example`) providing `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `MQTT_PORT`, `FASTAPI_PORT`, `WEB_PORT`, `ROBOT_TCP_PORT`, `NTP_PORT`, `HOST_IP`, `QUEUE_SIZE`, `BATCHES`, `B_TIMEOUT`, and the `VITE_*`/`*_URL` build args consumed by `web/dockerfile`.
 
-By default `DB_HOST` points at the lab NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts to that same NAS — this only works from inside the lab network. To replicate the stack elsewhere: `docker compose --profile local-db up -d` adds a bundled `postgres`/`pgadmin` alongside the lab stack (still requires NFS access for backups/logs unless unused); `docker compose -f project/docker-compose.local.yml up -d` is a fully self-contained, NAS-free copy of the whole stack (bundled Postgres/pgAdmin, local volumes) for testing on any machine. See `project/web/docs/docker/compose.md`.
+By default `DB_HOST` points at the lab NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts to that same NAS — this only works from inside the lab network. To replicate the stack elsewhere: `docker compose --profile local-db up -d` adds a bundled `postgres` alongside the lab stack (still requires NFS access for backups/logs unless unused); `docker compose -f docker-compose.local.yml up -d` is a fully self-contained, NAS-free copy of the whole stack (bundled Postgres/pgAdmin, local volumes) for testing on any machine. See `web/docs/docker/compose.md`.
 
 ## Notes for changes in this repo
 
 - `db/database.py` is imported by both `fast_server` (FastAPI process) and `tcp_server.py` (separate process/container) — changes to its interface affect both call sites, and `DatabaseSingleton` state (device/session caches) is **not** shared between the two processes.
 - Timestamps: the TCP robot protocol is parsed assuming `US/Eastern` local time and converted to UTC epoch (`tcp_server.py`); IMU/camera timestamps come pre-parsed from device payloads via `fast_server/parsing.py`. Keep this asymmetry in mind when touching time handling.
-- Lab standard operating procedures (physical lab steps, SSH targets, IP addresses) live in the VitePress docs site under `project/web/docs/operations/` and `project/web/docs/expanding/` — e.g. `operations/running-a-test.md` and `expanding/swarm-nodes.md` — useful context for understanding *why* the session/backup/websocket flow is shaped the way it is, but not something to treat as generic developer docs. There is a separate, unrelated copy of some of this content baked into `project/web/public/info/` for the dashboard's in-app "Info" document library (see `docker/automations.md`'s "Dashboard document library generation") — don't confuse the two.
+- Lab standard operating procedures (physical lab steps, SSH targets, IP addresses) live in the VitePress docs site under `web/docs/operations/` and `web/docs/expanding/` — e.g. `operations/running-a-test.md` and `expanding/swarm-nodes.md` — useful context for understanding *why* the session/backup/websocket flow is shaped the way it is, but not something to treat as generic developer docs. There is a separate, unrelated copy of some of this content baked into `web/public/info/` for the dashboard's in-app "Info" document library (see `docker/automations.md`'s "Dashboard document library generation") — don't confuse the two.
