@@ -3,7 +3,7 @@
 # Every variable reference below is interpolated by `docker stack deploy` from the
 # calling process's environment, sourced from .env in this directory.
 # stack-controller loads that file itself (see env_file in
-# stack_controller/stacks.yml). To deploy by hand from project/deploy/:
+# stack_controller/stacks.yml). To deploy by hand from deploy/:
 #
 #   set -a; source ./.env; set +a
 #   docker stack deploy --resolve-image never -c swarm-edge-nodes.yml edge

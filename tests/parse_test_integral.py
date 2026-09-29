@@ -2,7 +2,7 @@ import unittest
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from project.fast_server import main as m
+from fast_server import main as m
 
 
 class ParserIntegralTests(unittest.IsolatedAsyncioTestCase):
@@ -24,7 +24,7 @@ class ParserIntegralTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast:
             await m.handle_sensors(None, topic, payload, None, None)
@@ -43,10 +43,10 @@ class ParserIntegralTests(unittest.IsolatedAsyncioTestCase):
         payload = b"bad,not,enough,fields"
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast, patch(
-            "project.fast_server.main.cur_imu_logger"
+            "fast_server.main.cur_imu_logger"
         ) as mock_logger:
 
             await m.handle_sensors(None, topic, payload, None, None)
@@ -63,7 +63,7 @@ class ParserIntegralTests(unittest.IsolatedAsyncioTestCase):
         payload = b"34234234234, 1, 2, 33, 44, 55, 66, 77, 88, image.py"
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast:
             await m.handle_camera(None, topic, payload, None, None)
@@ -82,10 +82,10 @@ class ParserIntegralTests(unittest.IsolatedAsyncioTestCase):
         payload = b"bad,not,enough,fields"
 
         with patch(
-            "project.fast_server.main.broadcast_message",
+            "fast_server.main.broadcast_message",
             new_callable=AsyncMock,
         ) as mock_broadcast, patch(
-            "project.fast_server.main.cur_camera_logger"
+            "fast_server.main.cur_camera_logger"
         ) as mock_logger:
 
             await m.handle_camera(None, topic, payload, None, None)

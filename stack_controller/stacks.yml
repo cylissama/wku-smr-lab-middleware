@@ -1,6 +1,6 @@
 # Whitelist of Swarm stacks this agent is allowed to deploy/remove.
 # Mounted read-only into the container at /config/stacks.yml.
-# Paths are inside the container: /stacks is project/deploy mounted read-only.
+# Paths are inside the container: /stacks is deploy/ mounted read-only.
 #
 # env_file (optional) is read fresh on every deploy and layered over the
 # container's environment, since `docker stack deploy` interpolates ${VAR}s

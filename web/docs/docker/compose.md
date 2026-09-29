@@ -3,7 +3,7 @@
 [Docker Compose](https://docs.docker.com/compose/) is used to orchestrate (deploy) this entire project. We create containers for each service, such as the fast-api application, or the mqtt broker, then we 'spin' those containers up to run our services.
 
 
-`project/docker-compose.yml` defines the always-on broker stack. It runs on a single host — the Data Broker Mini PC — and is brought up with a plain `docker compose up -d` from `project/`.
+`docker-compose.yml` defines the always-on broker stack. It runs on a single host — the Data Broker Mini PC — and is brought up with a plain `docker compose up -d` from the repo root.
 
 We plan to switch all orchestration to Docker Swarm in the future.
 
@@ -12,12 +12,12 @@ We plan to switch all orchestration to Docker Swarm in the future.
 | Service | Image / build | Purpose |
 | --- | --- | --- |
 | `mqtt-broker` | `eclipse-mosquitto:2` | Receives IMU (`imu/#`) and camera (`camera/#`) messages. Config mounted from `mqtt_conf/`. |
-| `fastapi-app` | built from `project/dockerfile` | HTTP API, WebSocket broadcast, MQTT subscriber, batched IMU/camera inserts, session + backup control. |
+| `fastapi-app` | built from `dockerfile` | HTTP API, WebSocket broadcast, MQTT subscriber, batched IMU/camera inserts, session + backup control. |
 | `tcp` | built from `tcp_server/dockerfile` | Raw TCP listener for robot telemetry; batched robot inserts. |
 | `web` | built from `web/dockerfile` | React/Vite dashboard + this VitePress docs site, served by nginx. |
 | `ntp` | `cturra/ntp:latest` | Shared time source (see [Automations](/docker/automations)). |
 
-Everything is driven by a single `.env` file in `project/` — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`).
+Everything is driven by a single `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`).
 
 ### `mqtt-broker`
 
@@ -71,7 +71,7 @@ This stack is intentionally separate from the IMU edge nodes, which are deployed
 
 ## Running outside the lab
 
-`docker-compose.yml` assumes it's running on the Data Broker Mini PC: `DB_HOST` points at the NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts back to that same NAS. Neither is reachable from a laptop or CI runner. Two options exist for replicating the stack elsewhere, both driven by `project/.env` — copy `project/.env.example` to `project/.env` and fill in real values first.
+`docker-compose.yml` assumes it's running on the Data Broker Mini PC: `DB_HOST` points at the NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts back to that same NAS. Neither is reachable from a laptop or CI runner. Two options exist for replicating the stack elsewhere, both driven by `.env` — copy `.env.example` to `.env` and fill in real values first.
 
 ### Option A — add a local DB alongside the lab stack
 
@@ -97,7 +97,7 @@ It's a separate file rather than an override merged with `docker-compose.yml`, k
 
 Both Option A and Option B bring up a `pgadmin` container at `http://localhost:${PGADMIN_PORT}` (default `5050`).
 
-- **pgAdmin login** — `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` from your `project/.env` (falls back to `admin@example.com` / `admin` if left unset — see `docker-compose.yml`/`docker-compose.local.yml`).
+- **pgAdmin login** — `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` from your `.env` (falls back to `admin@example.com` / `admin` if left unset — see `docker-compose.yml`/`docker-compose.local.yml`).
 - **Connecting to the database inside pgAdmin** — add a new server using:
   - Host: `postgres` (the Compose service name, not `localhost`)
   - Port: `5432`
@@ -105,4 +105,4 @@ Both Option A and Option B bring up a `pgadmin` container at `http://localhost:$
   - Username: `${DB_USER}`
   - Password: `${DB_PASSWORD}`
 
-  All four come from the same `project/.env` used to bring up the stack.
+  All four come from the same `.env` used to bring up the stack.
