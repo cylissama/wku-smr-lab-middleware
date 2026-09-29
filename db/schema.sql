@@ -133,3 +133,34 @@ CREATE TABLE robot (
 );
 
 CREATE INDEX robot_device_id_recorded_at_idx ON robot (device_id, recorded_at DESC);
+
+-- Session-scoped indexes for student queries; see the Sep 29 2026 (b) entry in
+-- db/migrations.md. idx_robot_session_frame pre-dates that entry on the NAS.
+CREATE INDEX imu_measurement_session_id_device_id_recorded_at_idx
+    ON imu_measurement (session_id, device_id, recorded_at);
+CREATE INDEX image_detection_session_id_frame_idx_idx
+    ON image_detection (session_id, frame_idx);
+CREATE INDEX idx_robot_session_frame ON robot (session_id, frame_id);
+
+-- Group roles for per-person pgAdmin accounts (lab_viewers: read-only,
+-- lab_admins: full access without superuser); see the Sep 29 2026 entry in
+-- db/migrations.md and pgadmin/provision-users.sh. Roles are cluster-wide, so
+-- this block is written to be safe against a server that already has them.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'lab_viewers') THEN
+        CREATE ROLE lab_viewers NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'lab_admins') THEN
+        CREATE ROLE lab_admins NOLOGIN;
+    END IF;
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO lab_viewers', current_database());
+    EXECUTE format('GRANT ALL ON DATABASE %I TO lab_admins', current_database());
+    EXECUTE format('GRANT %I TO lab_admins WITH INHERIT TRUE, SET FALSE', current_user);
+END
+$$;
+GRANT USAGE ON SCHEMA public TO lab_viewers;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO lab_viewers;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO lab_viewers;
+GRANT USAGE, CREATE ON SCHEMA public TO lab_admins;
+GRANT pg_monitor, pg_signal_backend TO lab_admins;

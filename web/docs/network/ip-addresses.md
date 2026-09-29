@@ -50,7 +50,7 @@ USW PRO 24
 | dell | DHCP | E4:B9:7A:F5:17:2C | | | |
 | Middleware Dashboard | 192.168.2.100:80 | | data-team (linux) | 1234 | Need to test |
 | Postgres Database | 192.168.2.111:5000 | | db_user | 1234 | See `192.168.1.111:5433`; need to test |
-| pgAdmin GUI | 192.168.1.104:8080 | | admin@wku.edu | 1234 | Need to test |
+| pgAdmin GUI | 192.168.2.100:5050 | | per-user | per-user | `pgadmin` container in the AMS stack; old NAS instance at 192.168.1.104:8080 is retired. See [Accessing the database](/data/accessing-database) |
 | AXIS Camera | 192.168.2.36 | 00:40:8C:7F:33:80 | root | password | |
 
 ## 192.168.3.XX

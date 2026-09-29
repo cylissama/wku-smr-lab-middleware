@@ -22,7 +22,8 @@ tcp_server/tcp_server.py   # raw asyncio TCP listener for robot telemetry (own p
 mqtt_conf/mosquitto.conf   # Mosquitto broker config
 tests/                 # unittest-based tests, run as a package from repo root (see below)
 deploy/                # standalone Swarm/Portainer stack manifests for the edge-node cluster
-docker-compose.yml     # the always-on broker stack (single host: mqtt, fastapi, tcp, web, ntp)
+docker-compose.yml     # the always-on broker stack (single host: mqtt, fastapi, tcp, web, ntp, pgadmin)
+pgadmin/               # provision-users.sh: per-person pgAdmin accounts + admin/viewer Postgres roles
 Dockerfile             # fastapi-app image
 web/                   # React + Vite dashboard AND a separate VitePress docs site
 ├── src/                # dashboard SPA (sessions, device status, message streams, backups)
@@ -40,7 +41,8 @@ For a deeper walkthrough with data-flow diagrams, read `web/docs/overview/struct
 - **Sessions gate everything.** All data is scoped to a session row (`session` table); `get_latest_session()` caches the current session id for ~10s to avoid hammering the DB. Starting/stopping a session also rotates the file loggers (`loggers.create_loggers()`) and triggers an automatic DB backup on stop.
 - **Live updates** flow to the dashboard over four separate WebSocket channels (`/ws/camera`, `/ws/imu`, `/ws/robot`, `/ws/misc`), each backed by a `ConnectionManager` in `connection_manager.py`. `POST /send/{channel}` lets any service (including the standalone TCP process) push a message onto one of these channels.
 - **Backups** are `pg_dump`/`pg_restore` shelled out from `DatabaseSingleton` to an NFS-mounted volume (`/db_backups`), not a Postgres extension or managed service. Restoring drops and recreates the database, then reopens the pool — it is destructive and only intended for lab recovery workflows.
-- **Two deployment surfaces**: the always-on broker stack (`docker-compose.yml`, one host: mqtt broker, fastapi, tcp, web, ntp) and the IMU edge cluster (`deploy/swarm-imu-edge-nodes.yml`, a Docker Swarm across several Raspberry Pis, one per physical IMU via node labels). Related device-node repos (IMU, camera) are separate GitHub repos — see `REPOS.MD`.
+- **pgAdmin runs in the broker stack**, not on the NAS: an always-on `pgadmin` service in server mode with one account per person, each tied to their own Postgres login role in one of two groups: `lab_viewers` (students: read-only, per-role `statement_timeout`/connection limits, restricted `Viewer` pgAdmin role) or `lab_admins` (full access via inherited `DB_USER` rights with `SET FALSE`, so not superuser). Accounts are created by `pgadmin/provision-users.sh`; its data volume is deliberately local, not NFS.
+- **Two deployment surfaces**: the always-on broker stack (`docker-compose.yml`, one host: mqtt broker, fastapi, tcp, web, ntp, pgadmin) and the IMU edge cluster (`deploy/swarm-imu-edge-nodes.yml`, a Docker Swarm across several Raspberry Pis, one per physical IMU via node labels). Related device-node repos (IMU, camera) are separate GitHub repos — see `REPOS.MD`.
 - **`web/` builds two independent frontends** served by the same nginx container: the operational dashboard SPA (`src/`) and the VitePress docs site (`docs/`), built with separate `npm run build` / `npm run docs:build` commands and mounted at `/` and `/docs/` respectively by `nginx.conf`.
 - **No schema migration tool.** Schema changes are hand-run SQL logged chronologically in `db/migrations.md`. When changing table shape, add an entry there and update the SQL in `db/database.py` together.
 
@@ -72,7 +74,7 @@ docker compose up -d
 ```
 Requires a `.env` file next to `docker-compose.yml` (not committed, see `.env.example`) providing `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `MQTT_PORT`, `FASTAPI_PORT`, `WEB_PORT`, `ROBOT_TCP_PORT`, `NTP_PORT`, `HOST_IP`, `QUEUE_SIZE`, `BATCHES`, `B_TIMEOUT`, and the `VITE_*`/`*_URL` build args consumed by `web/dockerfile`.
 
-By default `DB_HOST` points at the lab NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts to that same NAS — this only works from inside the lab network. To replicate the stack elsewhere: `docker compose --profile local-db up -d` adds a bundled `postgres`/`pgadmin` alongside the lab stack (still requires NFS access for backups/logs unless unused); `docker compose -f docker-compose.local.yml up -d` is a fully self-contained, NAS-free copy of the whole stack (bundled Postgres/pgAdmin, local volumes) for testing on any machine. See `web/docs/docker/compose.md`.
+By default `DB_HOST` points at the lab NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts to that same NAS — this only works from inside the lab network. To replicate the stack elsewhere: `docker compose --profile local-db up -d` adds a bundled `postgres` alongside the lab stack (still requires NFS access for backups/logs unless unused); `docker compose -f docker-compose.local.yml up -d` is a fully self-contained, NAS-free copy of the whole stack (bundled Postgres/pgAdmin, local volumes) for testing on any machine. See `web/docs/docker/compose.md`.
 
 ## Notes for changes in this repo
 

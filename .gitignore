@@ -26,3 +26,10 @@ __pycache__/
 # Common editor/system files
 .vscode/
 .idea/
+
+# pgAdmin provisioning: real roster and generated credentials/SQL
+pgadmin/users.csv
+pgadmin/generated/
+
+# Lab account logins (real passwords, never commit)
+.accounts

@@ -244,5 +244,5 @@ This will stop the session and complete the test.
 
 ## 9. Celebrate / Review Data
 
-Feel free to [explore the data](http://192.168.1.111:8080/browser/) and celebrate a successful test. 
+Feel free to [explore the data](http://192.168.2.100:5050/browser/) and celebrate a successful test. 
 

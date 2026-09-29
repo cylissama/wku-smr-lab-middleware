@@ -16,6 +16,7 @@ We plan to switch all orchestration to Docker Swarm in the future.
 | `tcp` | built from `tcp_server/dockerfile` | Raw TCP listener for robot telemetry; batched robot inserts. |
 | `web` | built from `web/dockerfile` | React/Vite dashboard + this VitePress docs site, served by nginx. |
 | `ntp` | `cturra/ntp:latest` | Shared time source (see [Automations](/docker/automations)). |
+| `pgadmin` | `dpage/pgadmin4:9` | Multi-user pgAdmin for querying the database (see [Accessing the database](/data/accessing-database)). |
 
 Everything is driven by a single `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`).
 
@@ -44,6 +45,14 @@ nginx inside this container (`web/nginx.conf`) does three things:
 ### `tcp`
 
 Same `.env`-driven configuration pattern as `fastapi-app`, listening on `ROBOT_TCP_PORT` (default `5001`).
+
+### `pgadmin`
+
+The lab's pgAdmin, moved off the NAS into this stack. Published on `PGADMIN_PORT` (default `5050`), so it lives at `http://192.168.2.100:5050`, and the dashboard's pgAdmin button defaults to `http://${HOST_IP}:${PGADMIN_PORT}` unless `DB_GUI_URL` is set. It connects to whatever `DB_HOST` points at.
+
+- **Server mode, one account per person.** Everyone gets their own pgAdmin login and their own Postgres role, as either a viewer (read-only) or an admin, created with `pgadmin/provision-users.sh`. The full workflow is in [Accessing the database](/data/accessing-database#managing-accounts-admins).
+- **Tuned for speed.** pgAdmin can only run one gunicorn worker, so concurrency comes from threads: `GUNICORN_THREADS` is raised from the image default of 25 to `PGADMIN_THREADS` (default `50`). The upgrade check, per-request access log and bundled postfix are all disabled. The service has no CPU or memory limits.
+- **Local volume.** `pgadmin_data` is a normal Docker volume on the mini PC's disk, not NFS. pgAdmin stores users, saved servers and query history in SQLite, which is slow and prone to locking problems over NFS. Back it up with `docker run --rm -v <project>_pgadmin_data:/d -v $PWD:/out alpine tar czf /out/pgadmin_data.tgz -C /d .` if needed.
 
 ### `ntp`
 
@@ -75,13 +84,13 @@ This stack is intentionally separate from the IMU edge nodes, which are deployed
 
 ### Option A — add a local DB alongside the lab stack
 
-`docker-compose.yml` includes optional `postgres` and `pgadmin` services behind the `local-db` [Compose profile](https://docs.docker.com/compose/how-tos/profiles/), off by default:
+`docker-compose.yml` includes an optional `postgres` service behind the `local-db` [Compose profile](https://docs.docker.com/compose/how-tos/profiles/), off by default (`pgadmin` is always on and follows `DB_HOST`):
 
 ```bash
 docker compose --profile local-db up -d
 ```
 
-This adds a bundled Postgres (`AMS-postgres`) and pgAdmin (`AMS-pgadmin`, default `http://localhost:5050`) to the same stack. To actually use them instead of the NAS, set `DB_HOST=postgres` and `DB_PORT=5432` in `.env`. Note the `nas_backups`/`logs` volumes are unaffected by this profile — they still require NFS access to `${DB_HOST}`'s NAS unless you're only using the local DB for something that doesn't touch backups.
+This adds a bundled Postgres (`AMS-postgres`) to the same stack. To actually use them instead of the NAS, set `DB_HOST=postgres` and `DB_PORT=5432` in `.env`. Note the `nas_backups`/`logs` volumes are unaffected by this profile — they still require NFS access to `${DB_HOST}`'s NAS unless you're only using the local DB for something that doesn't touch backups.
 
 ### Option B — fully portable, no NAS required
 

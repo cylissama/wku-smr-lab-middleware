@@ -128,7 +128,7 @@ Give the system roughly 15–20 seconds to flush any remaining messages, then cl
 
 ## 10. Review data
 
-- [Database Browser](http://192.168.1.111:8080/browser/)
+- [Database Browser](http://192.168.2.100:5050/browser/)
 - [Dashboard](http://192.168.1.76/data/dashboard)
 
 ## Quick reference

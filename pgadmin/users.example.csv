@@ -1,0 +1,5 @@
+email,db_role,group
+# group=admin: pgAdmin administrator + full database access (lab_admins)
+# group=viewer (or blank): Query Tool only + read-only database access (lab_viewers)
+lab.admin@example.edu,labadmin,admin
+student.one@example.edu,sone,viewer

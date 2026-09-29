@@ -85,7 +85,7 @@ services:
           VITE_DB_GUI_URL: ${VITE_DB_GUI_URL:-}
           VITE_PORTAINER_URL: ${VITE_PORTAINER_URL:-}
           ROBOT_CAMERA_URL: ${ROBOT_CAMERA_URL:-}
-          DB_GUI_URL: ${DB_GUI_URL:-}
+          DB_GUI_URL: ${DB_GUI_URL:-http://${HOST_IP}:${PGADMIN_PORT:-5050}}
           PORTAINER_URL: ${PORTAINER_URL:-}
       container_name: AMS-dashboard-docs
       ports:
@@ -138,9 +138,9 @@ services:
 
   # --- Optional local database, for replicating the stack outside the lab ---
   # The lab deployment points DB_HOST at the NAS-hosted Postgres instance, which
-  # isn't reachable from a laptop or CI box. Bring these two up alongside the
+  # isn't reachable from a laptop or CI box. Bring this up alongside the
   # rest of the stack with `docker compose --profile local-db up -d` and set
-  # DB_HOST=postgres / DB_PORT=5432 in .env to use them instead of the NAS.
+  # DB_HOST=postgres / DB_PORT=5432 in .env to use it instead of the NAS.
   # Note: nas_backups/logs below are still NFS-mounted to the NAS regardless of
   # this profile — for a fully NAS-free run, use docker-compose.local.yml instead.
   postgres:
@@ -158,20 +158,44 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
 
+  # --- pgAdmin (always on) ---
+  # Multi-user pgAdmin for the lab, replacing the old instance on the NAS. Runs in
+  # server mode: every student gets their own pgAdmin login (and their own
+  # Postgres role), so saved servers, query history and open connections are
+  # isolated per person. Accounts are created with pgadmin/provision-users.sh,
+  # see web/docs/data/accessing-database.md. It talks to whatever DB_HOST points
+  # at, so it works against the NAS Postgres or the local-db profile's postgres.
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:9
     container_name: AMS-pgadmin
-    profiles:
-      - local-db
+    restart: unless-stopped
     environment:
+      # Initial admin account, only applied on first start against an empty
+      # pgadmin_data volume; change it from the UI afterwards
       - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
       - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=True
+      # Performance: pgAdmin can only run one gunicorn worker, so concurrency
+      # comes from threads (image default 25). Skip the startup upgrade check,
+      # the per-request access log and the bundled postfix (no mail relay here).
+      - GUNICORN_THREADS=${PGADMIN_THREADS:-50}
+      - GUNICORN_ACCESS_LOGFILE=/dev/null
+      - PGADMIN_CONFIG_UPGRADE_CHECK_ENABLED=False
+      - PGADMIN_CONFIG_CONSOLE_LOG_LEVEL=30
+      - PGADMIN_DISABLE_POSTFIX=true
     ports:
       - "${PGADMIN_PORT:-5050}:80"
     volumes:
+      # Local Docker volume, deliberately NOT an NFS mount: pgAdmin keeps its
+      # users/servers/query history in SQLite, which is slow and lock-prone on NFS
       - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      - postgres
+    # No cpus/mem_limit on purpose -- this host has headroom and pgAdmin should
+    # never be the thing that throttles a student's query
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/misc/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   chrony-state:

@@ -43,6 +43,7 @@ export default defineConfig({
           { text: 'Database uses', link: '/data/database-uses' },
           { text: 'Database structure', link: '/data/database-structure' },
           { text: 'Accessing the database', link: '/data/accessing-database' },
+          { text: 'New student access', link: '/data/new-student-access' },
           { text: 'Updating the schema', link: '/data/schema-changes' },
         ],
       },
