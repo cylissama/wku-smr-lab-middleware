@@ -18,7 +18,7 @@ This is just one part of the system, see:
 
 and
 
-[camera edge node](https://github.com/UmarKhattab09/camera_sensor_fusion)
+[camera edge node](https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/master)
 
 for our other components
 
