@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import MessageWB from "./components/MessageWB";
 import StatusIndicator from "./components/StatusIndicator";
 import BackupCard from "./components/BackupCard";
 import DashboardPanel from "./components/DashboardPanel";
+import DeviceSelector from "./components/DeviceSelector";
 import {
     getSessionLabels,
     getSessionStatus,
@@ -11,7 +12,7 @@ import {
     stopSessionRequest,
 } from "./api/sessionApi";
 import { sendDashboardMessage } from "./api/messageApi";
-import { getCapture, startListening, stopListening } from "./api/captureApi";
+import { getCapture, getDevices, startListening, stopListening } from "./api/captureApi";
 
 const ROBOT_CAMERA_URL = import.meta.env.VITE_ROBOT_CAMERA_URL;
 const DB_GUI_URL = import.meta.env.VITE_DB_GUI_URL;
@@ -84,6 +85,13 @@ export default function DataDashboard() {
     const [isSessionLabelsLoading, setIsSessionLabelsLoading] = useState(true);
     const [captureMode, setCaptureMode] = useState("idle");
     const [isMonitorBusy, setIsMonitorBusy] = useState(false);
+    // Device keys the backend is currently capturing (null = all), from /capture
+    const [captureDevices, setCaptureDevices] = useState(null);
+    const [devices, setDevices] = useState([]);
+    const [selectedDevices, setSelectedDevices] = useState(new Set());
+    const [devicesError, setDevicesError] = useState("");
+    const [isDevicesLoading, setIsDevicesLoading] = useState(true);
+    const hasInitialDeviceSelection = useRef(false);
 
     const sendMessage = async (dest, type, msg) => {
         try {
@@ -102,6 +110,7 @@ export default function DataDashboard() {
                 setActiveSession(Boolean(json.data));
                 const capture = await getCapture();
                 setCaptureMode(capture.mode);
+                setCaptureDevices(capture.devices ?? null);
                 setDashboardError("");
             } catch (e) {
                 const message = `Unable to load session status: ${getErrorMessage(e)}`;
@@ -122,6 +131,7 @@ export default function DataDashboard() {
             setActiveSession(Boolean(json.data));
             const capture = await getCapture();
             setCaptureMode(capture.mode);
+            setCaptureDevices(capture.devices ?? null);
         } catch {
             // stay quiet on poll failures — the initial load effect already surfaces errors
         }
@@ -159,6 +169,39 @@ export default function DataDashboard() {
         getLatestSession();
     }, []);
 
+    // Refresh device states every 3 s while monitoring/recording (so "receiving"
+    // shows up quickly), every 10 s when idle
+    useEffect(() => {
+        const loadDevices = async () => {
+            try {
+                const json = await getDevices();
+
+                if (json.success) {
+                    const list = Array.isArray(json.data) ? json.data : [];
+                    setDevices(list);
+                    setDevicesError("");
+
+                    // Start with everything selected; later refreshes only update states
+                    if (!hasInitialDeviceSelection.current) {
+                        setSelectedDevices(new Set(list.map((device) => device.key)));
+                        hasInitialDeviceSelection.current = true;
+                    }
+                } else {
+                    setDevicesError(`Unable to load devices: ${json.error}`);
+                }
+            } catch (e) {
+                setDevicesError(`Unable to load devices: ${getErrorMessage(e)}`);
+            } finally {
+                setIsDevicesLoading(false);
+            }
+        };
+
+        loadDevices();
+        const intervalId = setInterval(loadDevices, captureMode === "idle" ? 10000 : 3000);
+
+        return () => clearInterval(intervalId);
+    }, [captureMode]);
+
     useEffect(() => {
         const loadSessionLabels = async () => {
             setIsSessionLabelsLoading(true);
@@ -186,6 +229,29 @@ export default function DataDashboard() {
         loadSessionLabels();
     }, []);
 
+    const allDeviceKeys = devices.map((device) => device.key);
+    const selectedCount = allDeviceKeys.filter((key) => selectedDevices.has(key)).length;
+    const isSelectionLocked = captureMode !== "idle" || activeSession;
+
+    // What the picker shows: the live selection while locked, the draft otherwise
+    const shownSelection = isSelectionLocked
+        ? new Set(captureDevices ?? allDeviceKeys)
+        : selectedDevices;
+
+    // Device keys to send, or null for "every device" (also when the device list
+    // couldn't be loaded, so the dashboard still works without stack-controller)
+    const requestedDevices = () => {
+        if (captureMode === "monitor") {
+            return captureDevices; // recording keeps the monitored selection
+        }
+        if (devices.length === 0 || selectedCount === devices.length) {
+            return null;
+        }
+        return allDeviceKeys.filter((key) => selectedDevices.has(key));
+    };
+
+    const hasDeviceSelection = devices.length === 0 || selectedCount > 0;
+
     const startSession = async () => {
         setDashboardError("");
         await sendMessage("misc", "info", "Starting new session...");
@@ -193,11 +259,13 @@ export default function DataDashboard() {
         try {
             const now = new Date();
             const label = `${slugifyForLabel(selectedSessionLabel)}_${now.toISOString()}`;
-            const data = await startSessionByLabel(label, isTestSession, selectedSessionLabel);
+            const sessionDevices = requestedDevices();
+            const data = await startSessionByLabel(label, isTestSession, selectedSessionLabel, sessionDevices);
 
             if (data.success) {
                 setActiveSession(true);
                 setCaptureMode("record");
+                setCaptureDevices(sessionDevices);
                 if (data.id !== undefined && data.id !== null) {
                     setLatestSession(String(data.id));
                 }
@@ -257,10 +325,11 @@ export default function DataDashboard() {
         const starting = captureMode === "idle";
 
         try {
-            const data = starting ? await startListening() : await stopListening();
+            const data = starting ? await startListening(requestedDevices()) : await stopListening();
 
             if (data.success) {
                 setCaptureMode(data.mode);
+                setCaptureDevices(data.devices ?? null);
             } else {
                 const message = `Failed to ${starting ? "start" : "stop"} monitoring: ${data.error}`;
                 setDashboardError(message);
@@ -284,10 +353,12 @@ export default function DataDashboard() {
 
     const isActionDisabled = isStatusLoading || isLatestSessionLoading || isSessionLabelsLoading;
     const canStartSession =
-        !activeSession && !isActionDisabled && !isMonitorBusy && Boolean(selectedSessionLabel);
+        !activeSession && !isActionDisabled && !isMonitorBusy && hasDeviceSelection && Boolean(selectedSessionLabel);
     const isMonitoring = captureMode === "monitor";
     const canToggleMonitoring =
-        !isActionDisabled && !isMonitorBusy && (isMonitoring || (captureMode === "idle" && !activeSession));
+        !isActionDisabled &&
+        !isMonitorBusy &&
+        (isMonitoring || (captureMode === "idle" && !activeSession && hasDeviceSelection));
 
     return (
         <div className="min-h-screen bg-gray-100 text-gray-900">
@@ -440,6 +511,18 @@ export default function DataDashboard() {
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm lg:p-5">
+                    <DeviceSelector
+                        devices={devices}
+                        selected={shownSelection}
+                        onChange={setSelectedDevices}
+                        locked={isSelectionLocked}
+                        listening={captureMode === "monitor" || captureMode === "record"}
+                        error={devicesError}
+                        isLoading={isDevicesLoading}
+                    />
                 </div>
 
                 {dashboardError && (

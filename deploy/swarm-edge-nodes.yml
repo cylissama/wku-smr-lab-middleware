@@ -10,6 +10,16 @@
 #
 # Don't regenerate this file through an unquoted heredoc (cat <<EOF) or
 # envsubst -- the shell expands the variable references to empty strings.
+#
+# Every service carries smr.category / smr.device deploy labels naming the
+# device it runs, matching its MQTT topic (<category>/<device>). stack-controller
+# reads them for the dashboard's device picker (GET /stacks/edge/services).
+#
+# Healthchecks run every 10s: Swarm shows a task as "starting" until its first
+# check passes, and the first check only runs after one interval, so this sets
+# how soon the dashboard sees a device as running. start_period is the warm-up
+# during which failed checks don't count (cameras take longer to come up).
+# start_interval would be faster still but needs Docker 25+ on every node.
 
 services:
 
@@ -21,6 +31,9 @@ services:
     command: [python3, -m, imu_edge]
     deploy:
       replicas: 1
+      labels:
+        smr.category: imu
+        smr.device: "${IMU_106_DEVICE_ID}"
       restart_policy:
         condition: on-failure
       placement:
@@ -50,7 +63,7 @@ services:
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_106_DEVICE_ID}.json
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
       start_period: 15s
@@ -61,6 +74,9 @@ services:
     command: [python3, -m, imu_edge]
     deploy:
       replicas: 1
+      labels:
+        smr.category: imu
+        smr.device: "${IMU_107_DEVICE_ID}"
       restart_policy:
         condition: on-failure
       placement:
@@ -90,7 +106,7 @@ services:
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_107_DEVICE_ID}.json
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
       start_period: 15s
@@ -101,6 +117,9 @@ services:
     command: [python3, -m, imu_edge]
     deploy:
       replicas: 1
+      labels:
+        smr.category: imu
+        smr.device: "${IMU_108_DEVICE_ID}"
       restart_policy:
         condition: on-failure
       placement:
@@ -130,7 +149,7 @@ services:
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_108_DEVICE_ID}.json
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
       start_period: 15s
@@ -141,6 +160,9 @@ services:
     command: [python3, -m, imu_edge]
     deploy:
       replicas: 1
+      labels:
+        smr.category: imu
+        smr.device: "${IMU_109_DEVICE_ID}"
       restart_policy:
         condition: on-failure
       placement:
@@ -170,7 +192,7 @@ services:
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_109_DEVICE_ID}.json
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
       start_period: 15s
@@ -181,6 +203,9 @@ services:
     command: [python3, -m, imu_edge]
     deploy:
       replicas: 1
+      labels:
+        smr.category: imu
+        smr.device: "${IMU_110_DEVICE_ID}"
       restart_policy:
         condition: on-failure
       placement:
@@ -210,7 +235,7 @@ services:
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_110_DEVICE_ID}.json
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
       start_period: 15s
@@ -230,6 +255,9 @@ services:
 
     deploy:
       replicas: 1
+      labels:
+        smr.category: camera
+        smr.device: "${CAMERA_FRONT_DEVICE_ID}"
 
       restart_policy:
         condition: any
@@ -249,9 +277,10 @@ services:
 
     healthcheck:
       test: [CMD, python3, -m, camera_edge, healthcheck]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 30s
 
 
   camera-side:
@@ -267,6 +296,9 @@ services:
 
     deploy:
       replicas: 1
+      labels:
+        smr.category: camera
+        smr.device: "${CAMERA_SIDE_DEVICE_ID}"
 
       restart_policy:
         condition: any
@@ -286,6 +318,7 @@ services:
 
     healthcheck:
       test: [CMD, python3, -m, camera_edge, healthcheck]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 30s

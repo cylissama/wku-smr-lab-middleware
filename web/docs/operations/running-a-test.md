@@ -108,6 +108,17 @@ Healthy signs: a running task on the correct node, no socket connection failures
 
 Green listening indicators mean the dashboard's WebSocket feeds are connected. With no session running, the middleware ignores any device data that arrives — nothing is queued or stored, and nothing from before the session is carried into it. Data is only captured between **Start Session** and **Stop Session**. The badge next to the session indicator shows the current capture mode: **Idle**, **Monitoring — not saved**, **Recording**, or **Stopping**.
 
+### Choose which devices to run
+
+The **Devices** panel lists every IMU, camera, and the robot with its current state. Everything is ticked by default. Untick devices to test only part of the system — a whole category with its group box, or single devices. Only the ticked devices are started, shown in the live feeds, and recorded; the session remembers which devices it used. The selection is locked while monitoring or recording.
+
+Each device's status moves through **not deployed → starting → running → receiving**:
+
+- **starting / running** come from Docker Swarm. A device shows *starting* until its container's first health check passes (about 10 s for IMUs, longer for cameras while they warm up).
+- **receiving · N msg/s** means its data is actually reaching the AMS right now (a message within the last 3 s). This is the one to trust.
+- **running · no data** (amber) while monitoring or recording means the device is up but nothing is arriving — e.g. a camera with no marker in view, or a wrong MQTT topic.
+- The robot shows **connected** when it has a TCP connection open, and **receiving** once lines arrive.
+
 ### Optional: check the devices with monitor mode first
 
 To see that devices are publishing without recording anything, click **Start Monitoring**. This brings the edge devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot panels (message rate plus latest values). Nothing is written to the database. From here you can either click **Start Session** — recording starts immediately, without redeploying the devices — or **Stop Monitoring** to take the devices back down.

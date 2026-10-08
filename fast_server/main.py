@@ -3,13 +3,14 @@ import asyncio, os
 import aiohttp
 
 from fast_server import loggers
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import FastAPI, HTTPException, Query, WebSocket
 from fastapi_mqtt import FastMQTT, MQTTConfig
 from db.database import DatabaseSingleton, SessionNotStarted
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from fast_server.connection_manager import camera_manager, imu_manager, robot_manager, misc_manager, MANAGERS, broadcast_message
-from typing import Any
+from typing import Annotated, Any
+from pydantic import BaseModel
 
 from fast_server.parsing import parse_camera_message, parse_imu_message
 from fast_server.capture import CaptureMode, CaptureState, LiveSampler, device_key, split_current
@@ -79,6 +80,9 @@ capture = CaptureState()
 # At most one live sample per device per LIVE_SAMPLE_INTERVAL seconds goes to
 # the dashboard while monitoring or recording
 live_sampler = LiveSampler(float(os.getenv("LIVE_SAMPLE_INTERVAL", 1.0)))
+
+# A device counts as "receiving" if a message from it arrived this recently (s)
+RECEIVING_TIMEOUT = float(os.getenv("RECEIVING_TIMEOUT", 3))
 
 # Swarm stacks brought up/down together with each session, via stack-controller
 MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "edge").split(",") if s.strip()]
@@ -320,30 +324,138 @@ async def get_robot(label: str) -> dict[str, Any]:
 
     return {"error": str(e), "success": False}
 
-# Calls the stack-controller agent to deploy/remove one Swarm stack.
-# Mirrors tcp_server.py's send_to_fastapi() -- same internal-call pattern.
-async def call_stack_controller(action: str, stack: str) -> dict[str, Any]:
+# Calls the stack-controller agent. Mirrors tcp_server.py's send_to_fastapi()
+# -- same internal-call pattern. Never raises: failures come back as
+# {"success": False, "error": ...}; successful bodies get "success": True.
+async def stack_controller_request(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     host = os.getenv("STACK_CONTROLLER_HOST", "stack-controller")
     port = os.getenv("STACK_CONTROLLER_PORT", "8080")
     token = os.getenv("STACK_CONTROLLER_TOKEN")
-    url = f"http://{host}:{port}/stacks/{stack}/{action}"
+    url = f"http://{host}:{port}{path}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers={"Authorization": f"Bearer {token}"}) as resp:
+            async with session.request(method, url, json=body, headers={"Authorization": f"Bearer {token}"}) as resp:
                 if resp.status != 200:
                     text = await resp.text()
-                    loggers.log_system_logger(f"stack-controller {action} '{stack}' failed ({resp.status}): {text}", True)
+                    loggers.log_system_logger(f"stack-controller {method} {path} failed ({resp.status}): {text}", True)
                     return {"success": False, "error": text}
-                return await resp.json()
+                data = await resp.json()
+                data.setdefault("success", True)
+                return data
     except Exception as e:
-        loggers.log_system_logger(f"Could not reach stack-controller for {action} '{stack}': {e}", True)
+        loggers.log_system_logger(f"Could not reach stack-controller for {method} {path}: {e}", True)
         return {"success": False, "error": str(e)}
 
-# Deploys every stack in MANAGED_STACKS, returns {stack_name: result}
-async def deploy_managed_stacks() -> dict[str, dict[str, Any]]:
-    results = await asyncio.gather(*(call_stack_controller("deploy", s) for s in MANAGED_STACKS))
+# Deploys/removes one Swarm stack; services limits a deploy to those services
+async def call_stack_controller(action: str, stack: str, services: list[str] | None = None) -> dict[str, Any]:
+    body = {"services": services} if services is not None else None
+    return await stack_controller_request("POST", f"/stacks/{stack}/{action}", body)
+
+# Deploys every stack in MANAGED_STACKS, returns {stack_name: result}. With a
+# plan ({stack: [services]}, from resolve_selection), only those services run;
+# a stack with none selected is removed instead, so it doesn't keep publishing.
+async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None) -> dict[str, dict[str, Any]]:
+
+    async def deploy_one(stack: str) -> dict[str, Any]:
+        services = plan.get(stack) if plan is not None else None
+        if services == []:
+            result = await call_stack_controller("remove", stack)
+            if not result.get("success"):
+                loggers.log_system_logger(f"Could not remove unselected stack '{stack}': {result.get('error')}", True)
+            return {"success": True, "skipped": True}
+        return await call_stack_controller("deploy", stack, services)
+
+    results = await asyncio.gather(*(deploy_one(s) for s in MANAGED_STACKS))
     return dict(zip(MANAGED_STACKS, results))
+
+# The robot isn't a Swarm service -- it streams to tcp_server on its own
+ROBOT_DEVICE = {"key": device_key("robot", "main"), "category": "robot", "device_label": "main",
+                "stack": None, "service": None}
+
+# Every selectable device: each managed stack's services that carry
+# smr.category/smr.device labels (see deploy/swarm-edge-nodes.yml), plus the robot
+async def load_device_catalog() -> list[dict[str, Any]]:
+    listings = await asyncio.gather(*(stack_controller_request("GET", f"/stacks/{s}/services") for s in MANAGED_STACKS))
+    devices = []
+
+    for stack, listing in zip(MANAGED_STACKS, listings):
+        if not listing.get("success"):
+            raise RuntimeError(f"Could not list devices in stack '{stack}': {listing.get('error')}")
+
+        for svc in listing.get("services", []):
+            if svc.get("category") and svc.get("device_label"):
+                devices.append({
+                    "key": device_key(svc["category"], svc["device_label"]),
+                    "category": svc["category"],
+                    "device_label": svc["device_label"],
+                    "stack": stack,
+                    "service": svc["service"],
+                })
+
+    devices.append(dict(ROBOT_DEVICE))
+    return devices
+
+# Turns selected device keys into (capture filter, {stack: [services to deploy]}).
+# None means every device / whole stacks. Raises ValueError on a bad selection.
+async def resolve_selection(devices: list[str] | None) -> tuple[set[str] | None, dict[str, list[str]] | None]:
+    if devices is None:
+        return None, None
+    if not devices:
+        raise ValueError("No devices selected")
+
+    catalog = {d["key"]: d for d in await load_device_catalog()}
+    unknown = sorted(set(devices) - catalog.keys())
+    if unknown:
+        raise ValueError(f"Unknown device(s): {', '.join(unknown)}")
+
+    plan: dict[str, list[str]] = {stack: [] for stack in MANAGED_STACKS}
+    for key in sorted(set(devices)):
+        device = catalog[key]
+        if device["stack"]:
+            plan[device["stack"]].append(device["service"])
+
+    return set(devices), plan
+
+class DeviceSelection(BaseModel):
+    # Device keys like "imu/106"; omit (null) for every device
+    devices: list[str] | None = None
+
+# API to list selectable devices with their current state, for the dashboard
+@app.get("/devices")
+async def get_devices() -> dict[str, Any]:
+    try:
+        catalog = await load_device_catalog()
+    except Exception as e:
+        return {"error": str(e), "success": False}
+
+    *stack_statuses, robot_status = await asyncio.gather(
+        *(stack_controller_request("GET", f"/stacks/{s}/status") for s in MANAGED_STACKS),
+        get_robot_queue_status(),
+    )
+    statuses = dict(zip(MANAGED_STACKS, stack_statuses))
+
+    for device in catalog:
+        # Is its data actually arriving? Only tracked while monitoring/recording.
+        if device["stack"]:
+            device.update(live_sampler.activity(device["key"], RECEIVING_TIMEOUT))
+        else:
+            device.update(robot_status.get("activity") or {"receiving": False, "rate": None, "last_seen_s": None})
+
+        if device["stack"]:
+            status = statuses[device["stack"]]
+            if not status.get("success") or (status.get("state") == "error" and not status.get("services")):
+                device["state"] = "unknown"
+            else:
+                # Swarm names services <stack name>_<service>
+                states = [s["state"] for s in status.get("services", []) if s["name"].endswith("_" + device["service"])]
+                device["state"] = states[0] if states else "not_deployed"
+        elif "error" in robot_status:
+            device["state"] = "unknown"
+        else:
+            device["state"] = "connected" if robot_status.get("connections", 0) > 0 else "not_connected"
+
+    return {"data": catalog, "selected": capture.to_dict()["devices"], "success": True}
 
 # Removes every stack in MANAGED_STACKS, returns {stack_name: result}
 async def remove_managed_stacks() -> dict[str, dict[str, Any]]:
@@ -371,8 +483,8 @@ async def push_capture_to_tcp() -> bool:
         return False
 
 # Changes the capture state and propagates it to tcp_server
-async def set_capture(mode: CaptureMode, session_id: int | None = None) -> None:
-    capture.set(mode, session_id=session_id)
+async def set_capture(mode: CaptureMode, session_id: int | None = None, devices: set[str] | None = None) -> None:
+    capture.set(mode, session_id=session_id, devices=devices)
     loggers.log_system_logger(f"Capture mode -> {mode.value} (session {session_id})")
     await push_capture_to_tcp()
 
@@ -384,14 +496,19 @@ async def get_capture() -> dict[str, Any]:
 # API to start monitor (listen-only) mode: brings the edge stacks up and shows
 # live samples on the dashboard, but nothing is stored
 @app.post("/listen/start")
-async def start_listening() -> dict[str, Any]:
+async def start_listening(body: DeviceSelection | None = None) -> dict[str, Any]:
     if capture.mode != CaptureMode.IDLE:
         return {"error": f"Can't start monitoring while {capture.mode.value}", "success": False}
 
-    await set_capture(CaptureMode.MONITOR)
+    try:
+        selected, plan = await resolve_selection(body.devices if body else None)
+    except Exception as e:
+        return {"error": str(e), "success": False}
+
+    await set_capture(CaptureMode.MONITOR, devices=selected)
     await broadcast_message(misc_manager, "Monitoring started -- live data only, nothing is stored", "info")
 
-    deploy_results = await deploy_managed_stacks()
+    deploy_results = await deploy_managed_stacks(plan)
     failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
     if failed_stacks:
@@ -474,7 +591,14 @@ async def drain_queues(timeout: float = 10.0, poll_interval: float = 0.5) -> tup
 
 # API to start a session
 @app.get("/session/start/{label}")
-async def start_session(label: str, session_label: str, is_test_session: bool = True) -> dict[str, Any]:
+# devices: repeated ?devices=imu/106&devices=robot/main to record only those;
+# omitted = every device
+async def start_session(
+    label: str,
+    session_label: str,
+    is_test_session: bool = True,
+    devices: Annotated[list[str] | None, Query()] = None,
+) -> dict[str, Any]:
 
     # Create new logs for this new session only
     loggers.create_loggers()
@@ -484,12 +608,19 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
     opened_gate = False
 
     # Monitoring already has the edge stacks up, so recording just flips the gate
+    # (unless the selection changed)
     was_monitoring = capture.mode == CaptureMode.MONITOR
+    monitored_devices = capture.devices
 
     # Prep logs and prepare session id
     try:
+        # Validated before the session row exists, so a bad selection creates nothing
+        selected, plan = await resolve_selection(devices)
+
         db = app.state.db
-        session_id = await db.create_session(label=label, session_label_name=session_label, is_test_session=is_test_session)
+        session_id = await db.create_session(
+            label=label, session_label_name=session_label, is_test_session=is_test_session, devices=selected,
+        )
 
         loggers.log_system_logger(f"System session created with label: {label} (type: {session_label})")
         loggers.cur_camera_logger.info(f"Camera session ready with label: {label}")
@@ -500,13 +631,13 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
 
         # Session row exists now, so open the gate before bringing the edge-node
         # stacks online -- their first published messages will be stored.
-        await set_capture(CaptureMode.RECORD, session_id=session_id)
+        await set_capture(CaptureMode.RECORD, session_id=session_id, devices=selected)
         opened_gate = True
 
-        if was_monitoring:
+        if was_monitoring and selected == monitored_devices:
             deploy_results = {}
         else:
-            deploy_results = await deploy_managed_stacks()
+            deploy_results = await deploy_managed_stacks(plan)
         failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
         if failed_stacks:
@@ -537,7 +668,10 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
         # Never leave the gate open without a session behind it; if we came from
         # monitoring, the stacks are still up, so go back to that
         if opened_gate:
-            await set_capture(CaptureMode.MONITOR if was_monitoring else CaptureMode.IDLE)
+            if was_monitoring:
+                await set_capture(CaptureMode.MONITOR, devices=monitored_devices)
+            else:
+                await set_capture(CaptureMode.IDLE)
 
         loggers.log_system_logger(f"Failed to start session '{label}': {e}", True)
         loggers.cur_camera_logger.error(f"Camera session failed to start with label: {label}. Error: {e}")
@@ -560,7 +694,7 @@ async def stop_session() -> dict[str, Any]:
     # stacks and drain whatever's still queued before ending the session --
     # ensures nothing is left in the buffer when the session (and backup) closes.
     # session_id is kept while STOPPING so the workers still flush its batches.
-    await set_capture(CaptureMode.STOPPING, session_id=capture.session_id)
+    await set_capture(CaptureMode.STOPPING, session_id=capture.session_id, devices=capture.devices)
 
     remove_results = await remove_managed_stacks()
     failed_stacks = [name for name, result in remove_results.items() if not result.get("success")]
@@ -636,7 +770,13 @@ async def restore_capture() -> None:
         session_id = None
 
     if session_id:
-        await set_capture(CaptureMode.RECORD, session_id=session_id)
+        try:
+            devices = await app.state.db.get_session_devices(session_id)
+        except Exception as e:
+            # Fail open to every device rather than dropping a live session's data
+            loggers.log_system_logger(f"Could not read device selection for session {session_id}: {e}", True)
+            devices = None
+        await set_capture(CaptureMode.RECORD, session_id=session_id, devices=devices)
     else:
         await set_capture(CaptureMode.IDLE)
 

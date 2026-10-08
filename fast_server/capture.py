@@ -81,19 +81,23 @@ class CaptureState:
 
 # Throttles live dashboard samples to one per device per interval, so a 100 Hz
 # IMU doesn't flood the WebSockets. Counts what arrived in between so each
-# sample can report the device's message rate.
+# sample can report the device's message rate. Also remembers when each device
+# was last heard from, for the dashboard's "receiving" state (activity()).
 class LiveSampler:
 
     def __init__(self, interval_s: float = 1.0):
         self.interval_s = interval_s
         self._last: dict[str, float] = {}
         self._count: dict[str, int] = {}
+        self._seen: dict[str, float] = {}
+        self._rate: dict[str, float] = {}
 
     # Records one message for key; returns its rate (msg/s) if a sample is due
     # now, else None. The first message from a device is always sampled.
     def tick(self, key: str, now: float | None = None) -> float | None:
         now = time.monotonic() if now is None else now
         self._count[key] = self._count.get(key, 0) + 1
+        self._seen[key] = now
 
         last = self._last.get(key)
         if last is not None and now - last < self.interval_s:
@@ -103,7 +107,25 @@ class LiveSampler:
         count = self._count[key]
         self._last[key] = now
         self._count[key] = 0
-        return count / elapsed if elapsed > 0 else 0.0
+        rate = count / elapsed if elapsed > 0 else 0.0
+        if rate > 0:
+            self._rate[key] = rate
+        return rate
+
+    # Whether key has sent anything in the last timeout_s seconds, its latest
+    # measured rate (msg/s, None until there's been a second sample), and how
+    # long ago it was last heard from (None if never)
+    def activity(self, key: str, timeout_s: float = 3.0, now: float | None = None) -> dict[str, Any]:
+        now = time.monotonic() if now is None else now
+        seen = self._seen.get(key)
+
+        if seen is None:
+            return {"receiving": False, "rate": None, "last_seen_s": None}
+
+        age = now - seen
+        receiving = age <= timeout_s
+        rate = self._rate.get(key) if receiving else None
+        return {"receiving": receiving, "rate": round(rate, 1) if rate else None, "last_seen_s": round(age, 1)}
 
     # "12 msg/s", or "first sample" when there's no previous sample to measure from
     @staticmethod
@@ -113,6 +135,8 @@ class LiveSampler:
     def reset(self) -> None:
         self._last.clear()
         self._count.clear()
+        self._seen.clear()
+        self._rate.clear()
 
 
 # Splits a worker's batch into items still belonging to the current capture

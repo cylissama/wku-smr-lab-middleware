@@ -1,4 +1,4 @@
-import asyncio, asyncpg, os, subprocess
+import asyncio, asyncpg, json, os, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from fast_server import loggers
@@ -747,7 +747,8 @@ class DatabaseSingleton:
         return label_id
 
     # Call to create a new session in DB & update current session
-    async def create_session(self, label, session_label_name, is_test_session=True):
+    # devices: selected device keys, or None for every device (stored as NULL)
+    async def create_session(self, label, session_label_name, is_test_session=True, devices=None):
 
         session_id = await self.get_latest_session()
 
@@ -761,15 +762,23 @@ class DatabaseSingleton:
 
             session_id = await conn.fetchval(
                 """
-                INSERT INTO session (label, started_at, is_test_session, session_label_id)
-                VALUES ($1, $2, $3, $4) RETURNING id
+                INSERT INTO session (label, started_at, is_test_session, session_label_id, devices)
+                VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id
                 """,
-                label, self.get_time(), is_test_session, session_label_id
+                label, self.get_time(), is_test_session, session_label_id,
+                json.dumps(sorted(devices)) if devices is not None else None
             )
 
         self.current_session_id = session_id
 
         return session_id
+
+    # Device keys selected for a session, or None if it used every device
+    async def get_session_devices(self, session_id) -> set[str] | None:
+        async with self.pool.acquire() as conn:
+            raw = await conn.fetchval("SELECT devices FROM session WHERE id = $1", session_id)
+
+        return set(json.loads(raw)) if raw is not None else None
 
     # Call to end the current active session
     async def end_session(self):

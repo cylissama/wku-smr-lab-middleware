@@ -52,6 +52,7 @@ export default defineConfig({
         items: [
           { text: 'Compose', link: '/docker/compose' },
           { text: 'Swarm', link: '/docker/swarm' },
+          { text: 'Stack controller & device selection', link: '/docker/stack-controller' },
           { text: 'Automations', link: '/docker/automations' },
           { text: 'TCP Server', link: '/docker/tcp-server' },
           { text: 'Portainer', link: '/docker/portainer' },

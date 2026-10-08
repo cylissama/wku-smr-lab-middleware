@@ -21,6 +21,10 @@ robot_pending = 0
 # either pushed via PUT /capture or pulled by capture_sync_loop().
 capture = CaptureState()
 
+# Open robot TCP connections, reported by /queue/status so the dashboard's
+# device list can show whether the robot is connected
+robot_connections = 0
+
 # At most one live robot sample per LIVE_SAMPLE_INTERVAL seconds goes to the
 # dashboard while monitoring or recording
 live_sampler = LiveSampler(float(os.getenv("LIVE_SAMPLE_INTERVAL", 1.0)))
@@ -123,8 +127,11 @@ async def robot_worker(batch_size=50, flush_interval=2.0):
 
 # Handles TCP Connection
 async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    global robot_connections
+
     db = await DatabaseSingleton.get_instance()
     buf = b""
+    robot_connections += 1
 
     try:
         while True:
@@ -199,6 +206,7 @@ async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
     except asyncio.CancelledError:
         loggers.cur_robot_logger.info("Robot handler cancelled")
     finally:
+        robot_connections -= 1
         writer.close()
         await writer.wait_closed()
         loggers.cur_robot_logger.info("Writer Closed")
@@ -213,6 +221,9 @@ async def queue_status(request: "web.Request") -> "web.Response":
         "depth": depth,
         "pending": robot_pending,
         "empty": depth == 0 and robot_pending == 0,
+        "connections": robot_connections,
+        # Is robot data actually arriving (only tracked while monitoring/recording)
+        "activity": live_sampler.activity("robot/main", float(os.getenv("RECEIVING_TIMEOUT", 3))),
     })
 
 

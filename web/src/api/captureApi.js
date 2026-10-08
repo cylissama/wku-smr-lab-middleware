@@ -5,10 +5,16 @@ export async function getCapture() {
     return apiGet("/capture");
 }
 
+// Selectable devices with their state: [{ key: "imu/106", category, device_label,
+// service, stack, state }]
+export async function getDevices() {
+    return apiGet("/devices");
+}
+
 // Monitor (listen-only) mode: edge devices run and live data shows on the
-// dashboard, but nothing is stored
-export async function startListening() {
-    return apiPost("/listen/start");
+// dashboard, but nothing is stored. devices: device keys, or null for all.
+export async function startListening(devices = null) {
+    return apiPost("/listen/start", { devices });
 }
 
 export async function stopListening() {

@@ -52,6 +52,7 @@ A discrete data-collection run.
 | `started_at` | `double precision` | NO | — | | Unix timestamp session began |
 | `ended_at` | `double precision` | YES | — | | Unix timestamp session ended (null while in progress) |
 | `is_test_session` | `boolean`¹ | NO | `true` | | Flags whether this is a test run vs. a real data-collection run |
+| `devices` | `jsonb` | YES | — | | Device keys selected for this run, e.g. `["imu/106", "robot/main"]`; `NULL` = every device (all sessions before Oct 2026) |
 
 ### 2.3 `session_device`
 

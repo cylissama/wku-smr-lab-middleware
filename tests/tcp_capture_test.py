@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -89,6 +90,28 @@ class TcpCaptureTests(unittest.IsolatedAsyncioTestCase):
     async def test_idle_sends_no_live_samples(self):
         await self.feed(ROBOT_LINE)
         self.mock_nowait.assert_not_called()
+
+    async def test_queue_status_counts_robot_connections(self):
+        reader = asyncio.StreamReader()
+        writer = MagicMock()
+        writer.wait_closed = AsyncMock()
+        handler = asyncio.create_task(t.handle_robot(reader, writer))
+        await asyncio.sleep(0)
+
+        during = json.loads((await t.queue_status(None)).text)["connections"]
+        reader.feed_eof()
+        await handler
+        after = json.loads((await t.queue_status(None)).text)["connections"]
+
+        self.assertEqual((during, after), (1, 0))
+
+    async def test_queue_status_reports_robot_activity(self):
+        t.capture.set(CaptureMode.MONITOR)
+
+        await self.feed(ROBOT_LINE)
+
+        activity = json.loads((await t.queue_status(None)).text)["activity"]
+        self.assertTrue(activity["receiving"])
 
     async def test_robot_not_selected_is_dropped(self):
         t.capture.set(CaptureMode.RECORD, session_id=8, devices={"imu/106"})
