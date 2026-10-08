@@ -7,7 +7,7 @@ Docker compose and Docker swarm are used to create "stacks" that can be deployed
 We 
 ## How data flows through the system
 
-Edge devices never talk to the database directly — everything is mediated by `fastapi-app` (MQTT-sourced IMU/camera data) or `tcp-server` (robot data). Both services share the same `db/database.py` module and the same PostgreSQL instance, keyed by the currently active session.
+Edge devices never talk to the database directly — everything is mediated by `fastapi-app` (MQTT-sourced IMU/camera data) or `tcp-server` (robot data). Both services share the same `db/database.py` module and the same PostgreSQL instance, keyed by the currently active session. Ingestion is gated by a capture state (`fast_server/capture.py`) that `fastapi-app` owns and pushes to `tcp-server`: data is only queued for storage while a session is recording, and is dropped otherwise.
 
 **Ingestion** — sensor data reaches PostgreSQL through one of two paths depending on the source device:
 

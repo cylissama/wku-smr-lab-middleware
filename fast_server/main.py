@@ -5,13 +5,14 @@ import aiohttp
 from fast_server import loggers
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi_mqtt import FastMQTT, MQTTConfig
-from db.database import DatabaseSingleton
+from db.database import DatabaseSingleton, SessionNotStarted
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from fast_server.connection_manager import camera_manager, imu_manager, robot_manager, misc_manager, MANAGERS, broadcast_message
 from typing import Any
 
 from fast_server.parsing import parse_camera_message, parse_imu_message
+from fast_server.capture import CaptureMode, CaptureState, split_current
 
 
 def build_allowed_origins() -> list[str]:
@@ -70,6 +71,10 @@ camera_queue = asyncio.Queue(maxsize=queue_size)
 # and it landing in Postgres. Updated by camera_worker/imu_worker below.
 imu_pending = 0
 camera_pending = 0
+
+# Gate for incoming device data: only stored while a session is recording.
+# Pushed to tcp_server on every change so robot data follows the same rules.
+capture = CaptureState()
 
 # Swarm stacks brought up/down together with each session, via stack-controller
 MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "edge").split(",") if s.strip()]
@@ -341,6 +346,37 @@ async def remove_managed_stacks() -> dict[str, dict[str, Any]]:
     results = await asyncio.gather(*(call_stack_controller("remove", s) for s in MANAGED_STACKS))
     return dict(zip(MANAGED_STACKS, results))
 
+# Pushes the capture state to tcp_server (separate process), which gates robot
+# data with it. Best effort: tcp_server also re-syncs from GET /capture on
+# its own, so a failed push is logged rather than fatal.
+async def push_capture_to_tcp() -> bool:
+    host = os.getenv("TCP_HOST", "tcp")
+    port = os.getenv("ROBOT_STATUS_PORT", "8090")
+    url = f"http://{host}:{port}/capture"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.put(url, json=capture.to_dict(), timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    loggers.log_system_logger(f"tcp_server rejected capture update ({resp.status}): {text}", True)
+                    return False
+                return True
+    except Exception as e:
+        loggers.log_system_logger(f"Could not push capture state to tcp_server: {e}", True)
+        return False
+
+# Changes the capture state and propagates it to tcp_server
+async def set_capture(mode: CaptureMode, session_id: int | None = None) -> None:
+    capture.set(mode, session_id=session_id)
+    loggers.log_system_logger(f"Capture mode -> {mode.value} (session {session_id})")
+    await push_capture_to_tcp()
+
+# API to get the current capture state -- tcp_server re-syncs from this
+@app.get("/capture")
+async def get_capture() -> dict[str, Any]:
+    return capture.to_dict()
+
 # Polls tcp_server's robot queue status over HTTP (it's a separate process/
 # container with its own robot_queue -- fastapi-app has no in-process handle
 # on it). Treated as "not empty" on any failure to reach it, so a drain
@@ -396,6 +432,10 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
     # Create new logs for this new session only
     loggers.create_loggers()
 
+    # Set once this call opens the gate, so a failure only closes a gate it opened
+    # (not one belonging to a session that was already recording)
+    opened_gate = False
+
     # Prep logs and prepare session id
     try:
         db = app.state.db
@@ -408,8 +448,11 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
 
         await broadcast_message(misc_manager, "Session started with logs successfully")
 
-        # Session row exists now, so it's safe to bring the edge-node stacks
-        # online -- their first published messages will have a session to land in.
+        # Session row exists now, so open the gate before bringing the edge-node
+        # stacks online -- their first published messages will be stored.
+        await set_capture(CaptureMode.RECORD, session_id=session_id)
+        opened_gate = True
+
         deploy_results = await deploy_managed_stacks()
         failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
@@ -420,6 +463,7 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
                 await broadcast_message(misc_manager, f"Failed to deploy '{name}' stack: {err}", "error")
 
             # Block: a session with no running stacks won't receive any data, so roll it back.
+            await set_capture(CaptureMode.IDLE)
             try:
                 await db.end_session()
             except Exception as rollback_err:
@@ -436,6 +480,10 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
             "success": True,
         }
     except Exception as e:
+
+        # Never leave the gate open without a session behind it
+        if opened_gate:
+            await set_capture(CaptureMode.IDLE)
 
         loggers.log_system_logger(f"Failed to start session '{label}': {e}", True)
         loggers.cur_camera_logger.error(f"Camera session failed to start with label: {label}. Error: {e}")
@@ -454,9 +502,12 @@ async def stop_session() -> dict[str, Any]:
 
     db = app.state.db
 
-    # Stop the edge-node stacks first so no new data arrives, then drain
-    # whatever's still queued in-process before ending the session -- ensures
-    # nothing is left in the buffer when the session (and backup) closes.
+    # Close the gate first so nothing new is queued, then stop the edge-node
+    # stacks and drain whatever's still queued before ending the session --
+    # ensures nothing is left in the buffer when the session (and backup) closes.
+    # session_id is kept while STOPPING so the workers still flush its batches.
+    await set_capture(CaptureMode.STOPPING, session_id=capture.session_id)
+
     remove_results = await remove_managed_stacks()
     failed_stacks = [name for name, result in remove_results.items() if not result.get("success")]
 
@@ -472,6 +523,7 @@ async def stop_session() -> dict[str, Any]:
         await broadcast_message(misc_manager, f"Warning: stopping session with data still buffered in: {', '.join(still_buffered)}", "error")
 
     await db.end_session()
+    await set_capture(CaptureMode.IDLE)
 
     loggers.log_system_logger("System session stopped successfully")
     loggers.cur_camera_logger.info(f"Camera session ended.")
@@ -489,6 +541,10 @@ async def stop_session() -> dict[str, Any]:
         "stack_removal_failed": failed_stacks or None,
     }
   except Exception as e:
+
+    # Stop was requested, so stop storing even if ending the session failed
+    if capture.mode != CaptureMode.IDLE:
+        await set_capture(CaptureMode.IDLE)
 
     loggers.log_system_logger(f"Failed to stop the current session: {e}", True)
     loggers.cur_camera_logger.error(f"Camera session failed to stop. Error: {e}")
@@ -509,14 +565,59 @@ async def startup():
     # Creates the loggers instances to be ready
     loggers.create_loggers()
 
+    # Resume recording if a session was left open (e.g. fastapi-app restarted
+    # mid-session); otherwise start idle. Always set() so the version is fresh.
+    await restore_capture()
+
     # Creates workers for IMU and CAMERA
     asyncio.create_task(camera_worker(batch_size=int(os.getenv("BATCHES", 50)), flush_interval=float(os.getenv("B_TIMEOUT"))))
     asyncio.create_task(imu_worker(batch_size=int(os.getenv("BATCHES", 50)), flush_interval=float(os.getenv("B_TIMEOUT"))))
+
+# Sets the capture state from the DB: RECORD if a session is open, else IDLE
+async def restore_capture() -> None:
+    try:
+        session_id = await app.state.db.get_latest_session()
+    except Exception as e:
+        loggers.log_system_logger(f"Could not check for an open session at startup: {e}", True)
+        session_id = None
+
+    if session_id:
+        await set_capture(CaptureMode.RECORD, session_id=session_id)
+    else:
+        await set_capture(CaptureMode.IDLE)
 
 # FastAPI Shutdown
 @app.on_event("shutdown")
 async def shutdown_event():
     await DatabaseSingleton.close()
+
+# Inserts one worker batch. Returns True when the batch is done with (stored or
+# deliberately dropped) and should be cleared, False to keep it and retry.
+# Items from an already-ended session, or a batch with no session to land in,
+# are dropped -- retrying them would write them into the NEXT session.
+async def flush_batch(batch, insert_batch, name, logger, manager) -> bool:
+    current, stale = split_current(capture, batch)
+
+    if stale:
+        logger.warning(f"Dropped {len(stale)} {name} rows captured outside the current session")
+
+    if not current:
+        return True
+
+    try:
+        await insert_batch(current)
+    except SessionNotStarted as e:
+        logger.error(f"{name} batch dropped, no active session: {e}")
+        await broadcast_message(manager, f"{name} batch of {len(current)} dropped: no active session", "error")
+        return True
+    except Exception as e:
+        logger.error(f"{name} batch insert failed: {e}")
+        await broadcast_message(manager, f"{name} batch insert failed: {e}", "error")
+        return False
+
+    logger.info(f"Inserted {len(current)} {name} rows")
+    await broadcast_message(manager, f"Inserted {len(current)} {name} rows")
+    return True
 
 # Camera Worker
 async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
@@ -542,19 +643,11 @@ async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
         now = asyncio.get_event_loop().time()
         if len(batch) >= batch_size or (batch and (now - last_flush) >= flush_interval):
 
-            try:
-                await db.insert_camera_batch(batch)
-
-                loggers.cur_camera_logger.info(f"Inserted {len(batch)} CAMERA rows")
-                await broadcast_message(camera_manager, f"Inserted {len(batch)} CAMERA rows")
-
+            if await flush_batch(batch, db.insert_camera_batch, "CAMERA", loggers.cur_camera_logger, camera_manager):
                 batch.clear()
                 camera_pending = 0
                 last_flush = now
-            except Exception as e:
-                loggers.cur_camera_logger.error(f"CAMERA batch insert failed: {e} {batch[0]}")
-                await broadcast_message(camera_manager, f"CAMERA batch insert failed: {e}", "error")
-
+            else:
                 await asyncio.sleep(1)
 
 # IMU Worker
@@ -581,40 +674,53 @@ async def imu_worker(batch_size=50, flush_interval=2.0) -> None:
         now = asyncio.get_event_loop().time()
         if len(batch) >= batch_size or (batch and (now - last_flush) >= flush_interval):
 
-            try:
-                await db.insert_imu_batch(batch)
-
-                loggers.cur_imu_logger.info(f"Inserted {len(batch)} IMU rows")
-                await broadcast_message(imu_manager, f"Inserted {len(batch)} IMU rows")
-
+            if await flush_batch(batch, db.insert_imu_batch, "IMU", loggers.cur_imu_logger, imu_manager):
                 batch.clear()
                 imu_pending = 0
                 last_flush = now
-            except Exception as e:
-                loggers.cur_imu_logger.error(f"IMU batch insert failed: {e}")
-                await broadcast_message(imu_manager, f"IMU batch insert failed: {e}", "error")
-
+            else:
                 await asyncio.sleep(1)
 
 # MQTT Subscription for IMU device topics
 @mqtt.subscribe("imu/#")
 async def handle_sensors(client, topic, payload, qos, prop) -> None:
 
+    # Not listening (no session) -- drop before spending time parsing
+    if not capture.is_listening():
+        return
+
     try:
         data = parse_imu_message(topic, payload)
-        await imu_queue.put(data)
     except Exception as e:
         loggers.cur_imu_logger.error(f"IMU parse error: {e}")
         await broadcast_message(imu_manager, f"IMU parse error: {e}", "error")
+        return
+
+    if not capture.accepts("imu", data["device_label"]):
+        return
+
+    if capture.should_store():
+        data["session_id"] = capture.session_id
+        await imu_queue.put(data)
 
 # MQTT Subscription for CAMERA device topics
 @mqtt.subscribe("camera/#")
 async def handle_camera(client, topic, payload, qos, prop) -> None:
 
+    # Not listening (no session) -- drop before spending time parsing
+    if not capture.is_listening():
+        return
+
     try:
         data = parse_camera_message(topic, payload)
-        await camera_queue.put(data)
-
     except Exception as e:
         loggers.cur_camera_logger.error(f"Camera parse error: {e}")
         await broadcast_message(camera_manager, f"Camera parse error: {e}", "error")
+        return
+
+    if not capture.accepts("camera", data["device_label"]):
+        return
+
+    if capture.should_store():
+        data["session_id"] = capture.session_id
+        await camera_queue.put(data)

@@ -3,7 +3,8 @@ from aiohttp import web
 from typing import Optional, Tuple
 from datetime import datetime
 from fast_server import loggers
-from db.database import DatabaseSingleton
+from db.database import DatabaseSingleton, SessionNotStarted
+from fast_server.capture import CaptureState, split_current
 from zoneinfo import ZoneInfo
 
 # Batched info for ROBOT
@@ -15,12 +16,19 @@ robot_queue = asyncio.Queue(maxsize=queue_size)
 # (via /queue/status below) needs both numbers.
 robot_pending = 0
 
-# Helper to send messages from TCP server to FASTAPI server
-async def send_to_fastapi(msg: str, msg_type: str = "normal"):
+# Copy of fastapi-app's capture state -- robot lines are only queued while it
+# says RECORD. Starts idle (drop everything) until the first sync arrives,
+# either pushed via PUT /capture or pulled by capture_sync_loop().
+capture = CaptureState()
+
+def fastapi_base_url() -> str:
     host = os.getenv("FASTAPI_HOST", os.getenv("HOST_IP", "localhost"))
     port = os.getenv("FASTAPI_PORT", "8000")
+    return f"http://{host}:{port}"
 
-    url = f"http://{host}:{port}/send/robot"
+# Helper to send messages from TCP server to FASTAPI server
+async def send_to_fastapi(msg: str, msg_type: str = "normal"):
+    url = f"{fastapi_base_url()}/send/robot"
 
     payload = {
         "type": msg_type,
@@ -36,6 +44,34 @@ async def send_to_fastapi(msg: str, msg_type: str = "normal"):
     except Exception as e:
         print(f"Could not reach FastAPI API: {e}")
 
+
+# Inserts one robot batch. Returns True when the batch is done with (stored or
+# deliberately dropped), False to keep it and retry. Same rules as
+# flush_batch() in fast_server/main.py: rows from an ended session, or with no
+# session to land in, are dropped rather than written into the next session.
+async def flush_robot_batch(db, batch) -> bool:
+    current, stale = split_current(capture, batch)
+
+    if stale:
+        loggers.cur_robot_logger.warning(f"Dropped {len(stale)} robot rows captured outside the current session")
+
+    if not current:
+        return True
+
+    try:
+        await db.insert_robot_batch(current)
+    except SessionNotStarted as e:
+        loggers.cur_robot_logger.error(f"Robot batch dropped, no active session: {e}")
+        await send_to_fastapi(f"Robot batch of {len(current)} dropped: no active session", "error")
+        return True
+    except Exception as e:
+        loggers.cur_robot_logger.error(f"DB batch insert failed: {e}")
+        await send_to_fastapi(f"Failed to store message: {e}", "error")
+        return False
+
+    loggers.cur_robot_logger.info(f"Inserted {len(current)} robot rows.")
+    await send_to_fastapi(f"Inserted {len(current)} robot rows.")
+    return True
 
 # Continuously comsumes the queue and performs batched DB insertions
 async def robot_worker(batch_size=50, flush_interval=2.0):
@@ -56,16 +92,11 @@ async def robot_worker(batch_size=50, flush_interval=2.0):
 
         now = time.monotonic()
         if (len(batch) >= batch_size) or (batch and (now - last_flush) >= flush_interval):
-            try:
-                await db.insert_robot_batch(batch)
-                loggers.cur_robot_logger.info(f"Inserted {len(batch)} robot rows.")
-                await send_to_fastapi(f"Inserted {len(batch)} robot rows.")
+            if await flush_robot_batch(db, batch):
                 batch.clear()
                 robot_pending = 0
                 last_flush = now
-            except Exception as e:
-                loggers.cur_robot_logger.error(f"DB batch insert failed: {e}")
-                await send_to_fastapi(f"Failed to store message: {e}", "error")
+            else:
                 await asyncio.sleep(1)
 
         await asyncio.sleep(0)
@@ -87,6 +118,11 @@ async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                 line, _, buf = buf.partition(b"\n")
                 text = line.decode("utf-8", errors="replace").strip()
                 if not text:
+                    continue
+
+                # Keep reading so the robot's connection stays up, but drop
+                # lines while not listening (no session)
+                if not capture.is_listening():
                     continue
 
                 try:
@@ -125,8 +161,13 @@ async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                         "recorded_at": db.get_time(),
                     }
 
-                    await robot_queue.put(data)
-                    loggers.cur_robot_logger.info(f"Queued message: {text}")
+                    if not capture.accepts("robot", "main"):
+                        continue
+
+                    if capture.should_store():
+                        data["session_id"] = capture.session_id
+                        await robot_queue.put(data)
+                        loggers.cur_robot_logger.info(f"Queued message: {text}")
                 except Exception as e:
                     print(f"ROBOT PARSE ERROR: {e} line={text!r}")  # 👈 new
                     loggers.cur_robot_logger.error(f"Parse error: {e}")
@@ -151,9 +192,42 @@ async def queue_status(request: "web.Request") -> "web.Response":
     })
 
 
+# PUT /capture -- fastapi-app pushes its capture state here on every change.
+# Stale copies (older version) are ignored.
+async def put_capture(request: "web.Request") -> "web.Response":
+    try:
+        data = await request.json()
+        applied = capture.apply(data)
+    except Exception as e:
+        return web.json_response({"error": f"bad capture state: {e}"}, status=400)
+
+    if applied:
+        loggers.cur_robot_logger.info(f"Capture mode -> {capture.mode.value} (session {capture.session_id})")
+    return web.json_response({"applied": applied, **capture.to_dict()})
+
+
+# Pulls fastapi-app's capture state on boot and every CAPTURE_SYNC_INTERVAL
+# seconds, as a safety net for pushes that didn't arrive (e.g. this process
+# restarted mid-session, or fastapi-app couldn't reach it).
+async def capture_sync_loop(interval: float) -> None:
+    url = f"{fastapi_base_url()}/capture"
+
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status == 200 and capture.apply(await resp.json()):
+                        loggers.cur_robot_logger.info(f"Capture synced -> {capture.mode.value} (session {capture.session_id})")
+        except Exception as e:
+            loggers.cur_robot_logger.warning(f"Capture sync with fastapi-app failed: {e}")
+
+        await asyncio.sleep(interval)
+
+
 async def start_status_server(port: int) -> None:
     app = web.Application()
     app.router.add_get("/queue/status", queue_status)
+    app.router.add_put("/capture", put_capture)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -176,6 +250,7 @@ async def start_tcp_server(host: Optional[str] = None, port: int = 5001):
 
     asyncio.create_task(robot_worker(batch_size=batch_size, flush_interval=batch_timeout))
     asyncio.create_task(start_status_server(status_port))
+    asyncio.create_task(capture_sync_loop(float(os.getenv("CAPTURE_SYNC_INTERVAL", 5))))
 
     async with server:
         await server.serve_forever()

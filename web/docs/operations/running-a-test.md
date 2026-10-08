@@ -106,7 +106,7 @@ Healthy signs: a running task on the correct node, no socket connection failures
 
 ## 6. Ensure the dashboard shows listening status
 
-Green listening indicators mean the middleware is waiting for incoming data. Red messages about no active session yet (e.g. `CAMERA batch insert failed: No current active session. Run a GET to start a new session.`) are expected before a session starts and are not a blocker.
+Green listening indicators mean the dashboard's WebSocket feeds are connected. With no session running, the middleware ignores any device data that arrives — nothing is queued or stored, and nothing from before the session is carried into it. Data is only captured between **Start Session** and **Stop Session**.
 
 ## 7. Start a session from the dashboard
 
@@ -124,7 +124,7 @@ When the robot run is complete, remove the IMU stack:
 docker stack rm imu
 ```
 
-Give the system roughly 15–20 seconds to flush any remaining messages, then click **Stop Session**.
+Then click **Stop Session**. It stops accepting new data first, then waits (up to 10 s) for the IMU, camera, and robot buffers to finish writing before ending the session; a warning names any buffer that didn't drain in time.
 
 ## 10. Review data
 
