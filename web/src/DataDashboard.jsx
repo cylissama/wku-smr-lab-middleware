@@ -11,11 +11,31 @@ import {
     stopSessionRequest,
 } from "./api/sessionApi";
 import { sendDashboardMessage } from "./api/messageApi";
+import { getCapture, startListening, stopListening } from "./api/captureApi";
 
 const ROBOT_CAMERA_URL = import.meta.env.VITE_ROBOT_CAMERA_URL;
 const DB_GUI_URL = import.meta.env.VITE_DB_GUI_URL;
 const PORTAINER_URL = import.meta.env.VITE_PORTAINER_URL;
 const DEFAULT_SESSION_LABEL_NAME = "Full System";
+
+// Badge text/colors per capture mode (see fast_server/capture.py)
+const CAPTURE_MODE_BADGES = {
+    idle: { label: "Idle — not listening", className: "border-gray-300 bg-gray-100 text-gray-700", dot: "bg-gray-400" },
+    monitor: { label: "Monitoring — not saved", className: "border-cyan-300 bg-cyan-50 text-cyan-800", dot: "bg-cyan-500 animate-pulse" },
+    record: { label: "Recording", className: "border-green-300 bg-green-50 text-green-800", dot: "bg-green-500 animate-pulse" },
+    stopping: { label: "Stopping — flushing data", className: "border-amber-300 bg-amber-50 text-amber-800", dot: "bg-amber-500 animate-pulse" },
+};
+
+function CaptureModeBadge({ mode }) {
+    const badge = CAPTURE_MODE_BADGES[mode] ?? CAPTURE_MODE_BADGES.idle;
+
+    return (
+        <div className={`flex items-center gap-2 rounded-md border px-3 py-1 text-sm font-medium ${badge.className}`}>
+            <span className={`inline-block h-2.5 w-2.5 rounded-full ${badge.dot}`}></span>
+            {badge.label}
+        </div>
+    );
+}
 
 function getErrorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -62,6 +82,8 @@ export default function DataDashboard() {
     const [sessionLabelOptions, setSessionLabelOptions] = useState([]);
     const [selectedSessionLabel, setSelectedSessionLabel] = useState("");
     const [isSessionLabelsLoading, setIsSessionLabelsLoading] = useState(true);
+    const [captureMode, setCaptureMode] = useState("idle");
+    const [isMonitorBusy, setIsMonitorBusy] = useState(false);
 
     const sendMessage = async (dest, type, msg) => {
         try {
@@ -78,6 +100,8 @@ export default function DataDashboard() {
             try {
                 const json = await getSessionStatus();
                 setActiveSession(Boolean(json.data));
+                const capture = await getCapture();
+                setCaptureMode(capture.mode);
                 setDashboardError("");
             } catch (e) {
                 const message = `Unable to load session status: ${getErrorMessage(e)}`;
@@ -96,6 +120,8 @@ export default function DataDashboard() {
         try {
             const json = await getSessionStatus();
             setActiveSession(Boolean(json.data));
+            const capture = await getCapture();
+            setCaptureMode(capture.mode);
         } catch {
             // stay quiet on poll failures — the initial load effect already surfaces errors
         }
@@ -171,6 +197,7 @@ export default function DataDashboard() {
 
             if (data.success) {
                 setActiveSession(true);
+                setCaptureMode("record");
                 if (data.id !== undefined && data.id !== null) {
                     setLatestSession(String(data.id));
                 }
@@ -209,6 +236,7 @@ export default function DataDashboard() {
             if (data.success) {
                 await sendMessage("misc", "info", "Session stopped");
                 setActiveSession(false);
+                setCaptureMode("idle");
             } else {
                 const message = "Failed to stop the session: " + data.error;
                 setDashboardError(message);
@@ -223,6 +251,30 @@ export default function DataDashboard() {
         }
     };
 
+    const toggleMonitoring = async () => {
+        setDashboardError("");
+        setIsMonitorBusy(true);
+        const starting = captureMode === "idle";
+
+        try {
+            const data = starting ? await startListening() : await stopListening();
+
+            if (data.success) {
+                setCaptureMode(data.mode);
+            } else {
+                const message = `Failed to ${starting ? "start" : "stop"} monitoring: ${data.error}`;
+                setDashboardError(message);
+                await sendMessage("misc", "error", message);
+            }
+        } catch (err) {
+            const message = "An unexpected error has occurred: " + getErrorMessage(err);
+            setDashboardError(message);
+            await sendMessage("misc", "error", message);
+        } finally {
+            setIsMonitorBusy(false);
+        }
+    };
+
     useEffect(() => {
         if (activeSession) {
             setIsConfirmingSession(false);
@@ -231,7 +283,11 @@ export default function DataDashboard() {
     }, [activeSession]);
 
     const isActionDisabled = isStatusLoading || isLatestSessionLoading || isSessionLabelsLoading;
-    const canStartSession = !activeSession && !isActionDisabled && Boolean(selectedSessionLabel);
+    const canStartSession =
+        !activeSession && !isActionDisabled && !isMonitorBusy && Boolean(selectedSessionLabel);
+    const isMonitoring = captureMode === "monitor";
+    const canToggleMonitoring =
+        !isActionDisabled && !isMonitorBusy && (isMonitoring || (captureMode === "idle" && !activeSession));
 
     return (
         <div className="min-h-screen bg-gray-100 text-gray-900">
@@ -253,6 +309,7 @@ export default function DataDashboard() {
                                                 : "Session Inactive"
                                         }
                                     />
+                                    <CaptureModeBadge mode={captureMode} />
                                     <div className="rounded-md bg-gray-100 px-3 py-1 text-sm text-gray-700">
                                         Most Recent Session:{" "}
                                         {isLatestSessionLoading
@@ -280,6 +337,24 @@ export default function DataDashboard() {
                                         </option>
                                     ))}
                                 </select>
+
+                                <button
+                                    type="button"
+                                    className={`w-40 rounded-md px-3 py-2 text-center text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:bg-gray-400 ${
+                                        isMonitoring ? "bg-cyan-700 hover:bg-cyan-800" : "bg-cyan-600 hover:bg-cyan-700"
+                                    }`}
+                                    disabled={!canToggleMonitoring}
+                                    onClick={toggleMonitoring}
+                                    title="Run the devices and show live data without storing anything"
+                                >
+                                    {isMonitorBusy
+                                        ? isMonitoring
+                                            ? "Stopping..."
+                                            : "Starting..."
+                                        : isMonitoring
+                                          ? "Stop Monitoring"
+                                          : "Start Monitoring"}
+                                </button>
 
                                 <div className="relative">
                                     <button

@@ -106,7 +106,11 @@ Healthy signs: a running task on the correct node, no socket connection failures
 
 ## 6. Ensure the dashboard shows listening status
 
-Green listening indicators mean the dashboard's WebSocket feeds are connected. With no session running, the middleware ignores any device data that arrives — nothing is queued or stored, and nothing from before the session is carried into it. Data is only captured between **Start Session** and **Stop Session**.
+Green listening indicators mean the dashboard's WebSocket feeds are connected. With no session running, the middleware ignores any device data that arrives — nothing is queued or stored, and nothing from before the session is carried into it. Data is only captured between **Start Session** and **Stop Session**. The badge next to the session indicator shows the current capture mode: **Idle**, **Monitoring — not saved**, **Recording**, or **Stopping**.
+
+### Optional: check the devices with monitor mode first
+
+To see that devices are publishing without recording anything, click **Start Monitoring**. This brings the edge devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot panels (message rate plus latest values). Nothing is written to the database. From here you can either click **Start Session** — recording starts immediately, without redeploying the devices — or **Stop Monitoring** to take the devices back down.
 
 ## 7. Start a session from the dashboard
 

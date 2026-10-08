@@ -12,7 +12,7 @@ from fast_server.connection_manager import camera_manager, imu_manager, robot_ma
 from typing import Any
 
 from fast_server.parsing import parse_camera_message, parse_imu_message
-from fast_server.capture import CaptureMode, CaptureState, split_current
+from fast_server.capture import CaptureMode, CaptureState, LiveSampler, device_key, split_current
 
 
 def build_allowed_origins() -> list[str]:
@@ -75,6 +75,10 @@ camera_pending = 0
 # Gate for incoming device data: only stored while a session is recording.
 # Pushed to tcp_server on every change so robot data follows the same rules.
 capture = CaptureState()
+
+# At most one live sample per device per LIVE_SAMPLE_INTERVAL seconds goes to
+# the dashboard while monitoring or recording
+live_sampler = LiveSampler(float(os.getenv("LIVE_SAMPLE_INTERVAL", 1.0)))
 
 # Swarm stacks brought up/down together with each session, via stack-controller
 MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "edge").split(",") if s.strip()]
@@ -377,6 +381,49 @@ async def set_capture(mode: CaptureMode, session_id: int | None = None) -> None:
 async def get_capture() -> dict[str, Any]:
     return capture.to_dict()
 
+# API to start monitor (listen-only) mode: brings the edge stacks up and shows
+# live samples on the dashboard, but nothing is stored
+@app.post("/listen/start")
+async def start_listening() -> dict[str, Any]:
+    if capture.mode != CaptureMode.IDLE:
+        return {"error": f"Can't start monitoring while {capture.mode.value}", "success": False}
+
+    await set_capture(CaptureMode.MONITOR)
+    await broadcast_message(misc_manager, "Monitoring started -- live data only, nothing is stored", "info")
+
+    deploy_results = await deploy_managed_stacks()
+    failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
+
+    if failed_stacks:
+        for name in failed_stacks:
+            err = deploy_results[name].get("error")
+            loggers.log_system_logger(f"Failed to deploy '{name}' stack for monitoring: {err}", True)
+            await broadcast_message(misc_manager, f"Failed to deploy '{name}' stack: {err}", "error")
+
+        await set_capture(CaptureMode.IDLE)
+        return {"error": f"Failed to deploy stack(s): {', '.join(failed_stacks)}", "success": False}
+
+    return {"success": True, **capture.to_dict()}
+
+# API to stop monitor mode and take the edge stacks back down
+@app.post("/listen/stop")
+async def stop_listening() -> dict[str, Any]:
+    if capture.mode != CaptureMode.MONITOR:
+        return {"error": f"Not monitoring (currently {capture.mode.value})", "success": False}
+
+    await set_capture(CaptureMode.IDLE)
+
+    remove_results = await remove_managed_stacks()
+    failed_stacks = [name for name, result in remove_results.items() if not result.get("success")]
+
+    for name in failed_stacks:
+        err = remove_results[name].get("error")
+        loggers.log_system_logger(f"Failed to remove '{name}' stack: {err}", True)
+        await broadcast_message(misc_manager, f"Failed to remove '{name}' stack: {err}", "error")
+
+    await broadcast_message(misc_manager, "Monitoring stopped", "info")
+    return {"success": True, "stack_removal_failed": failed_stacks or None, **capture.to_dict()}
+
 # Polls tcp_server's robot queue status over HTTP (it's a separate process/
 # container with its own robot_queue -- fastapi-app has no in-process handle
 # on it). Treated as "not empty" on any failure to reach it, so a drain
@@ -436,6 +483,9 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
     # (not one belonging to a session that was already recording)
     opened_gate = False
 
+    # Monitoring already has the edge stacks up, so recording just flips the gate
+    was_monitoring = capture.mode == CaptureMode.MONITOR
+
     # Prep logs and prepare session id
     try:
         db = app.state.db
@@ -453,7 +503,10 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
         await set_capture(CaptureMode.RECORD, session_id=session_id)
         opened_gate = True
 
-        deploy_results = await deploy_managed_stacks()
+        if was_monitoring:
+            deploy_results = {}
+        else:
+            deploy_results = await deploy_managed_stacks()
         failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
         if failed_stacks:
@@ -481,9 +534,10 @@ async def start_session(label: str, session_label: str, is_test_session: bool = 
         }
     except Exception as e:
 
-        # Never leave the gate open without a session behind it
+        # Never leave the gate open without a session behind it; if we came from
+        # monitoring, the stacks are still up, so go back to that
         if opened_gate:
-            await set_capture(CaptureMode.IDLE)
+            await set_capture(CaptureMode.MONITOR if was_monitoring else CaptureMode.IDLE)
 
         loggers.log_system_logger(f"Failed to start session '{label}': {e}", True)
         loggers.cur_camera_logger.error(f"Camera session failed to start with label: {label}. Error: {e}")
@@ -591,6 +645,23 @@ async def restore_capture() -> None:
 async def shutdown_event():
     await DatabaseSingleton.close()
 
+def format_imu_sample(d: dict[str, Any]) -> str:
+    return (f"accel ({d['accel_x']:.2f}, {d['accel_y']:.2f}, {d['accel_z']:.2f}) "
+            f"gyro ({d['gyro_x']:.2f}, {d['gyro_y']:.2f}, {d['gyro_z']:.2f}) "
+            f"ypr ({d['yaw']:.1f}, {d['pitch']:.1f}, {d['roll']:.1f})")
+
+def format_camera_sample(d: dict[str, Any]) -> str:
+    return (f"frame {d['frame_idx']} marker {d['marker_idx']} "
+            f"tvec ({d['tvec_x']:.3f}, {d['tvec_y']:.3f}, {d['tvec_z']:.3f})")
+
+# Sends a throttled "[live]" sample of a device's data to its dashboard channel
+async def send_live_sample(manager, category: str, data: dict[str, Any], fmt) -> None:
+    key = device_key(category, data["device_label"])
+    rate = live_sampler.tick(key)
+    if rate is None:
+        return
+    await broadcast_message(manager, f"[live] {key} · {LiveSampler.describe_rate(rate)} · {fmt(data)}", "live")
+
 # Inserts one worker batch. Returns True when the batch is done with (stored or
 # deliberately dropped) and should be cleared, False to keep it and retry.
 # Items from an already-ended session, or a batch with no session to land in,
@@ -685,7 +756,7 @@ async def imu_worker(batch_size=50, flush_interval=2.0) -> None:
 @mqtt.subscribe("imu/#")
 async def handle_sensors(client, topic, payload, qos, prop) -> None:
 
-    # Not listening (no session) -- drop before spending time parsing
+    # Not monitoring or recording -- drop before spending time parsing
     if not capture.is_listening():
         return
 
@@ -699,6 +770,8 @@ async def handle_sensors(client, topic, payload, qos, prop) -> None:
     if not capture.accepts("imu", data["device_label"]):
         return
 
+    await send_live_sample(imu_manager, "imu", data, format_imu_sample)
+
     if capture.should_store():
         data["session_id"] = capture.session_id
         await imu_queue.put(data)
@@ -707,7 +780,7 @@ async def handle_sensors(client, topic, payload, qos, prop) -> None:
 @mqtt.subscribe("camera/#")
 async def handle_camera(client, topic, payload, qos, prop) -> None:
 
-    # Not listening (no session) -- drop before spending time parsing
+    # Not monitoring or recording -- drop before spending time parsing
     if not capture.is_listening():
         return
 
@@ -720,6 +793,8 @@ async def handle_camera(client, topic, payload, qos, prop) -> None:
 
     if not capture.accepts("camera", data["device_label"]):
         return
+
+    await send_live_sample(camera_manager, "camera", data, format_camera_sample)
 
     if capture.should_store():
         data["session_id"] = capture.session_id

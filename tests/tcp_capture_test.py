@@ -40,12 +40,16 @@ class TcpCaptureTests(unittest.IsolatedAsyncioTestCase):
         # Fresh copy per test, as tcp_server has at boot (version 0, idle)
         self.capture = patch.object(t, "capture", CaptureState())
         self.capture.start()
+        self.nowait = patch("tcp_server.tcp_server.send_to_fastapi_nowait")
+        self.mock_nowait = self.nowait.start()
+        t.live_sampler.reset()
 
     async def asyncTearDown(self):
         self.loggers.stop()
         self.send.stop()
         self.get_db.stop()
         self.capture.stop()
+        self.nowait.stop()
 
     async def feed(self, *lines):
         reader = asyncio.StreamReader()
@@ -69,6 +73,22 @@ class TcpCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(items), 2)
         self.assertTrue(all(i["session_id"] == 8 for i in items))
         self.assertEqual(items[0]["joint1"], 1.0)
+
+    async def test_monitor_sends_one_live_sample_and_queues_nothing(self):
+        t.capture.set(CaptureMode.MONITOR)
+
+        await self.feed(ROBOT_LINE, ROBOT_LINE, ROBOT_LINE)
+
+        self.assertTrue(t.robot_queue.empty())
+        self.mock_nowait.assert_called_once()
+        text, msg_type = self.mock_nowait.call_args.args
+        self.assertEqual(msg_type, "live")
+        self.assertIn("[live] robot/main", text)
+        self.assertIn("joints (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)", text)
+
+    async def test_idle_sends_no_live_samples(self):
+        await self.feed(ROBOT_LINE)
+        self.mock_nowait.assert_not_called()
 
     async def test_robot_not_selected_is_dropped(self):
         t.capture.set(CaptureMode.RECORD, session_id=8, devices={"imu/106"})

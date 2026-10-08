@@ -79,6 +79,42 @@ class CaptureState:
         return True
 
 
+# Throttles live dashboard samples to one per device per interval, so a 100 Hz
+# IMU doesn't flood the WebSockets. Counts what arrived in between so each
+# sample can report the device's message rate.
+class LiveSampler:
+
+    def __init__(self, interval_s: float = 1.0):
+        self.interval_s = interval_s
+        self._last: dict[str, float] = {}
+        self._count: dict[str, int] = {}
+
+    # Records one message for key; returns its rate (msg/s) if a sample is due
+    # now, else None. The first message from a device is always sampled.
+    def tick(self, key: str, now: float | None = None) -> float | None:
+        now = time.monotonic() if now is None else now
+        self._count[key] = self._count.get(key, 0) + 1
+
+        last = self._last.get(key)
+        if last is not None and now - last < self.interval_s:
+            return None
+
+        elapsed = now - last if last is not None else 0.0
+        count = self._count[key]
+        self._last[key] = now
+        self._count[key] = 0
+        return count / elapsed if elapsed > 0 else 0.0
+
+    # "12 msg/s", or "first sample" when there's no previous sample to measure from
+    @staticmethod
+    def describe_rate(rate: float) -> str:
+        return f"{rate:.0f} msg/s" if rate > 0 else "first sample"
+
+    def reset(self) -> None:
+        self._last.clear()
+        self._count.clear()
+
+
 # Splits a worker's batch into items still belonging to the current capture
 # session and the stale ones to drop.
 def split_current(state: CaptureState, batch: list[dict[str, Any]]) -> tuple[list, list]:

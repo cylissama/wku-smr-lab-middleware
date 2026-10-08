@@ -162,8 +162,8 @@ Every MQTT message and TCP line goes through the same decision:
 
 | Phase | Scope | Delivers |
 |---|---|---|
-| **A** | Ingest gate, drop-batch fix, `tcp_server` `PUT /capture` (all devices) | Data is stored only during sessions; the leak is fixed |
-| **B** | `MONITOR` mode, `LiveSampler`, dashboard buttons + badge | Listen-only testing |
+| **A** ✅ | Ingest gate, drop-batch fix, `tcp_server` `PUT /capture` (all devices) | Data is stored only during sessions; the leak is fixed |
+| **B** ✅ | `MONITOR` mode, `LiveSampler`, dashboard buttons + badge | Listen-only testing |
 | **C** | Device catalog, selective deploy, `DeviceSelector`, `session.devices` migration | Subset / single-device testing |
 
 ## 8. Testing

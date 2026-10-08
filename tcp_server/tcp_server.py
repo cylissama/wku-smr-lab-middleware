@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 from datetime import datetime
 from fast_server import loggers
 from db.database import DatabaseSingleton, SessionNotStarted
-from fast_server.capture import CaptureState, split_current
+from fast_server.capture import CaptureState, LiveSampler, split_current
 from zoneinfo import ZoneInfo
 
 # Batched info for ROBOT
@@ -20,6 +20,13 @@ robot_pending = 0
 # says RECORD. Starts idle (drop everything) until the first sync arrives,
 # either pushed via PUT /capture or pulled by capture_sync_loop().
 capture = CaptureState()
+
+# At most one live robot sample per LIVE_SAMPLE_INTERVAL seconds goes to the
+# dashboard while monitoring or recording
+live_sampler = LiveSampler(float(os.getenv("LIVE_SAMPLE_INTERVAL", 1.0)))
+
+# Keeps fire-and-forget dashboard sends alive until they finish
+_background_tasks: set[asyncio.Task] = set()
 
 def fastapi_base_url() -> str:
     host = os.getenv("FASTAPI_HOST", os.getenv("HOST_IP", "localhost"))
@@ -37,12 +44,25 @@ async def send_to_fastapi(msg: str, msg_type: str = "normal"):
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as resp:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     print(f"FastAPI broadcast failed ({resp.status}): {text}")
     except Exception as e:
         print(f"Could not reach FastAPI API: {e}")
+
+
+# Sends to the dashboard without waiting, so a slow fastapi-app never stalls
+# reading from the robot socket
+def send_to_fastapi_nowait(msg: str, msg_type: str = "normal") -> None:
+    task = asyncio.create_task(send_to_fastapi(msg, msg_type))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def format_robot_sample(d: dict) -> str:
+    joints = ", ".join(f"{d[f'joint{i}']:.1f}" for i in range(1, 7))
+    return f"joints ({joints}) xyz ({d['x']:.1f}, {d['y']:.1f}, {d['z']:.1f})"
 
 
 # Inserts one robot batch. Returns True when the batch is done with (stored or
@@ -121,7 +141,7 @@ async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                     continue
 
                 # Keep reading so the robot's connection stays up, but drop
-                # lines while not listening (no session)
+                # lines while not monitoring or recording
                 if not capture.is_listening():
                     continue
 
@@ -163,6 +183,10 @@ async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
 
                     if not capture.accepts("robot", "main"):
                         continue
+
+                    rate = live_sampler.tick("robot/main")
+                    if rate is not None:
+                        send_to_fastapi_nowait(f"[live] robot/main · {live_sampler.describe_rate(rate)} · {format_robot_sample(data)}", "live")
 
                     if capture.should_store():
                         data["session_id"] = capture.session_id

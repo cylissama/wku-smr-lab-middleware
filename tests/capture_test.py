@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from db.database import SessionNotStarted
 from fast_server import main as m
-from fast_server.capture import CaptureMode, CaptureState, split_current
+from fast_server.capture import CaptureMode, CaptureState, LiveSampler, split_current
 
 IMU_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 0.1, 0.2, 0.3, 4, 5, 6, 7, 8, 9, 10, 20, 30"
 CAMERA_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 3, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6"
@@ -103,6 +103,31 @@ class CaptureStateTests(unittest.TestCase):
         self.assertEqual(copy.devices, {"imu/106", "robot/main"})
 
 
+class LiveSamplerTests(unittest.TestCase):
+
+    def test_first_message_sampled_then_throttled(self):
+        s = LiveSampler(interval_s=1.0)
+        self.assertEqual(s.tick("imu/106", now=10.0), 0.0)
+        self.assertIsNone(s.tick("imu/106", now=10.5))
+        self.assertIsNone(s.tick("imu/106", now=10.9))
+
+    def test_rate_counts_messages_since_last_sample(self):
+        s = LiveSampler(interval_s=1.0)
+        s.tick("imu/106", now=10.0)
+        for i in range(1, 100):
+            self.assertIsNone(s.tick("imu/106", now=10.0 + i * 0.01))
+        self.assertAlmostEqual(s.tick("imu/106", now=12.0), 100 / 2.0)
+
+    def test_describe_rate(self):
+        self.assertEqual(LiveSampler.describe_rate(0.0), "first sample")
+        self.assertEqual(LiveSampler.describe_rate(99.6), "100 msg/s")
+
+    def test_devices_throttled_independently(self):
+        s = LiveSampler(interval_s=1.0)
+        s.tick("imu/106", now=10.0)
+        self.assertEqual(s.tick("imu/107", now=10.1), 0.0)
+
+
 class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
@@ -112,6 +137,7 @@ class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
         self.loggers.start()
         self.broadcast = patch("fast_server.main.broadcast_message", new_callable=AsyncMock)
         self.mock_broadcast = self.broadcast.start()
+        m.live_sampler.reset()
 
     async def asyncTearDown(self):
         self.loggers.stop()
@@ -147,6 +173,33 @@ class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
         await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
 
         self.assertTrue(m.imu_queue.empty())
+
+    async def test_monitor_sends_throttled_live_samples(self):
+        m.capture.set(CaptureMode.MONITOR)
+
+        for _ in range(5):
+            await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
+        await m.handle_camera(None, "camera/front", CAMERA_PAYLOAD, None, None)
+
+        live = [c.args for c in self.mock_broadcast.call_args_list if c.args[2] == "live"]
+        self.assertEqual(len(live), 2)   # one per device, not one per message
+        self.assertIs(live[0][0], m.imu_manager)
+        self.assertIn("[live] imu/106", live[0][1])
+        self.assertIn("accel (0.10, 0.20, 0.30)", live[0][1])
+        self.assertIs(live[1][0], m.camera_manager)
+        self.assertIn("[live] camera/front", live[1][1])
+
+    async def test_record_also_sends_live_samples(self):
+        m.capture.set(CaptureMode.RECORD, session_id=42)
+
+        await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
+
+        self.assertEqual(len(drain(m.imu_queue)), 1)
+        self.assertTrue(any(c.args[2] == "live" for c in self.mock_broadcast.call_args_list))
+
+    async def test_idle_sends_no_live_samples(self):
+        await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
+        self.mock_broadcast.assert_not_called()
 
     async def test_stopping_drops(self):
         m.capture.set(CaptureMode.STOPPING, session_id=42)
@@ -317,6 +370,74 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result["success"])
         self.assertEqual(m.capture.mode, CaptureMode.IDLE)
+
+    async def test_listen_start_deploys_and_monitors(self):
+        with patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock,
+                   return_value={"edge": {"success": True}}) as deploy:
+            result = await m.start_listening()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["mode"], "monitor")
+        deploy.assert_awaited_once()
+        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
+
+    async def test_listen_start_deploy_failure_returns_to_idle(self):
+        with patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock,
+                   return_value={"edge": {"success": False, "error": "nope"}}):
+            result = await m.start_listening()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(m.capture.mode, CaptureMode.IDLE)
+
+    async def test_listen_start_refused_while_recording(self):
+        m.capture.set(CaptureMode.RECORD, session_id=11)
+
+        with patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock) as deploy:
+            result = await m.start_listening()
+
+        self.assertFalse(result["success"])
+        deploy.assert_not_awaited()
+        self.assertEqual(m.capture.mode, CaptureMode.RECORD)
+
+    async def test_listen_stop_removes_stacks(self):
+        m.capture.set(CaptureMode.MONITOR)
+
+        with patch("fast_server.main.remove_managed_stacks", new_callable=AsyncMock,
+                   return_value={"edge": {"success": True}}) as remove:
+            result = await m.stop_listening()
+
+        self.assertTrue(result["success"])
+        remove.assert_awaited_once()
+        self.assertEqual(m.capture.mode, CaptureMode.IDLE)
+
+    async def test_listen_stop_refused_while_recording(self):
+        m.capture.set(CaptureMode.RECORD, session_id=11)
+
+        with patch("fast_server.main.remove_managed_stacks", new_callable=AsyncMock) as remove:
+            result = await m.stop_listening()
+
+        self.assertFalse(result["success"])
+        remove.assert_not_awaited()
+        self.assertEqual(m.capture.mode, CaptureMode.RECORD)
+
+    async def test_start_session_from_monitor_skips_redeploy(self):
+        m.capture.set(CaptureMode.MONITOR)
+
+        with patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock) as deploy:
+            result = await m.start_session("lbl", session_label="Full System")
+
+        self.assertTrue(result["success"])
+        deploy.assert_not_awaited()
+        self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 11))
+
+    async def test_failed_start_from_monitor_keeps_monitoring(self):
+        m.capture.set(CaptureMode.MONITOR)
+        self.db.create_session = AsyncMock(side_effect=RuntimeError("db down"))
+
+        result = await m.start_session("lbl", session_label="Full System")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
 
     async def test_restore_capture_resumes_open_session(self):
         self.db.get_latest_session = AsyncMock(return_value=99)

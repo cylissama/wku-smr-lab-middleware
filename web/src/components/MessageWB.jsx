@@ -103,6 +103,8 @@ export default function MessageWB({ type }) {
                                     ? "text-red-400"
                                     : line.type === "info"
                                     ? "text-yellow-400"
+                                    : line.type === "live"
+                                    ? "text-cyan-300"
                                     : "text-green-400"
                             }`}
                         >
