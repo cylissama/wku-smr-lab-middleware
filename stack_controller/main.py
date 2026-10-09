@@ -3,15 +3,15 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
 from dotenv import dotenv_values
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from stack_controller.auth import verify_token
-from stack_controller import docker_ops
+from stack_controller import containers, docker_ops
 
 app = FastAPI()
 
@@ -119,6 +119,70 @@ def get_lock(name: str) -> asyncio.Lock:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# Restarts unhealthy smr.autoheal containers -- see stack_controller/containers.py
+_watchdog_task: asyncio.Task | None = None
+
+
+@app.on_event("startup")
+async def start_watchdog() -> None:
+    global _watchdog_task
+    if os.getenv("WATCHDOG_ENABLED", "true").lower() != "false":
+        _watchdog_task = asyncio.create_task(containers.watchdog.run())
+
+
+# Read-only status of the AMS containers (smr.monitor=true) for the dashboard,
+# proxied by nginx as /api/system/containers. Deliberately unauthenticated:
+# it's shown to anyone who opens the dashboard, and it changes nothing.
+@app.get("/containers")
+async def list_containers() -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(containers.list_containers)
+    except Exception as e:
+        raise HTTPException(503, f"Can't read container state from Docker: {type(e).__name__}: {e}")
+
+
+def _parse_since(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        raise HTTPException(400, f"Bad 'since': {value!r} (use an ISO time or unix seconds)")
+
+
+# Recent Docker logs of the AMS containers as LogRecords, oldest first, proxied
+# by nginx as /api/system/logs. Same visibility as /containers.
+@app.get("/logs")
+async def get_logs(
+    since: str | None = None,
+    tail: int = 200,
+    source: Annotated[list[str] | None, Query()] = None,
+    min_level: int = 0,
+    important_only: bool = False,
+    min_priority: int | None = None,
+) -> dict[str, Any]:
+    tail = max(1, min(tail, 1000))
+    try:
+        return await asyncio.to_thread(
+            containers.read_logs,
+            tail=tail,
+            since=_parse_since(since),
+            sources=source,
+            min_level=min_level,
+            important_only=important_only,
+            min_priority=min_priority,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"Can't read container logs from Docker: {type(e).__name__}: {e}")
 
 
 @app.get("/stacks/{name}/services", dependencies=[Depends(verify_token)])

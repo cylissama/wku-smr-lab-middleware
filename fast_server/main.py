@@ -1,9 +1,11 @@
-import asyncio, os
+import asyncio, logging, os, time
 
 import aiohttp
+import asyncpg
 
 from fast_server import loggers
-from fastapi import FastAPI, HTTPException, Query, WebSocket
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi.responses import JSONResponse
 from fastapi_mqtt import FastMQTT, MQTTConfig
 from db.database import DatabaseSingleton, SessionNotStarted
 from pathlib import Path
@@ -14,6 +16,7 @@ from pydantic import BaseModel
 
 from fast_server.parsing import parse_camera_message, parse_imu_message
 from fast_server.capture import CaptureMode, CaptureState, LiveSampler, device_key, split_current
+from fast_server.health import HealthRegistry, PathProbe, backoff_delay, describe_age
 
 
 def build_allowed_origins() -> list[str]:
@@ -40,11 +43,30 @@ def build_allowed_origins() -> list[str]:
     return sorted(origins)
 
 # MQTT Config Setup
+# reconnect_retries=-1: keep reconnecting after a lost connection forever
+# (fastapi-mqtt's default of 1 gives up after a single ~6 s retry)
 mqtt_config = MQTTConfig(
     host=os.getenv("MQTT_HOST", "mqtt-broker"),
     port=int(os.getenv("MQTT_PORT", 1883)),
     keepalive=60,
+    reconnect_retries=-1,
+    reconnect_delay=5,
 )
+
+# Successful GETs of endpoints that the dashboard and Docker health checks poll
+# every few seconds would otherwise bury everything else in `docker logs`
+# (and the dashboard's Logs box). Failures are still logged.
+QUIET_POLL_PATHS = {"/health", "/capture", "/devices", "/session"}
+
+class QuietPollFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 5:
+            return True
+        _client, method, path, _version, status = args[:5]
+        return not (method == "GET" and str(path).split("?")[0] in QUIET_POLL_PATHS and int(status) < 400)
+
+logging.getLogger("uvicorn.access").addFilter(QuietPollFilter())
 
 # FastAPI Client
 app = FastAPI()
@@ -58,9 +80,66 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-# Enabled FASTAPI + MQTT combo
+# Enabled FASTAPI + MQTT combo. Not mqtt.init_app(app): its startup hook awaits
+# the first connect, so a broker that's down at boot would stop the whole API.
+# mqtt_supervisor() connects in the background instead.
 mqtt = FastMQTT(config=mqtt_config)
-mqtt.init_app(app)
+
+# Set by db_supervisor() once the first connection succeeds; None until then
+app.state.db = None
+
+async def notify_misc(message: str, msg_type: str) -> None:
+    await broadcast_message(misc_manager, message, msg_type)
+
+# Dependency health, served by GET /health -- see fast_server/health.py
+health = HealthRegistry(["db", "mqtt", "stack_controller", "tcp", "logs", "backups"], notify=notify_misc)
+
+# How often the health monitor re-checks every dependency (s)
+HEALTH_INTERVAL = float(os.getenv("HEALTH_INTERVAL", 10))
+
+# Folder is attached in docker -- Must Match or else pathing errors
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR", "/db_backups"))
+
+# Raised by require_db() -- answered as a 503 with the reason
+class DatabaseUnavailable(Exception):
+    pass
+
+@app.exception_handler(DatabaseUnavailable)
+async def database_unavailable_handler(request: Request, exc: DatabaseUnavailable) -> JSONResponse:
+    return JSONResponse(status_code=503, content={
+        "success": False,
+        "error": str(exc),
+        "health": health.snapshot()["components"]["db"],
+    })
+
+# The DB handle for an endpoint that can't work without it. Raises
+# DatabaseUnavailable (-> 503) while the DB hasn't connected yet or the health
+# monitor last saw it down.
+def require_db() -> DatabaseSingleton:
+    db = app.state.db
+    if db is None or health.components["db"]["status"] == "down":
+        raise DatabaseUnavailable(f"Database unavailable: {health.describe('db')}")
+    return db
+
+def describe_exc(e: BaseException) -> str:
+    text = str(e).strip()
+    return f"{type(e).__name__}: {text}" if text else type(e).__name__
+
+# A DB error with where we were connecting to, e.g. "can't reach 192.168.1.104:5433:
+# no answer within 5s (host down or unreachable?)"
+def describe_db_error(e: BaseException) -> str:
+    target = f"{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}"
+    if isinstance(e, (asyncio.TimeoutError, TimeoutError)):
+        reason = f"no answer within {os.getenv('DB_CONNECT_TIMEOUT', '5')}s (host down or unreachable?)"
+    else:
+        reason = describe_exc(e)
+    return f"can't reach {target}: {reason}"
+
+# Errors that mean "the DB is unreachable", as opposed to a bad request
+def is_db_connection_error(e: BaseException) -> bool:
+    return isinstance(e, (DatabaseUnavailable, OSError, asyncio.TimeoutError, TimeoutError,
+                          asyncpg.PostgresConnectionError, asyncpg.InterfaceError,
+                          asyncpg.CannotConnectNowError))
 
 # Batched Input Configurations -- Use .env
 queue_size = int(os.getenv("QUEUE_SIZE", 5000))
@@ -84,6 +163,18 @@ live_sampler = LiveSampler(float(os.getenv("LIVE_SAMPLE_INTERVAL", 1.0)))
 # A device counts as "receiving" if a message from it arrived this recently (s)
 RECEIVING_TIMEOUT = float(os.getenv("RECEIVING_TIMEOUT", 3))
 
+# Most rows a worker holds while inserts fail (DB down); older rows are dropped
+# beyond this. Failures are reported at most every BACKLOG_REPORT_INTERVAL s.
+MAX_BACKLOG_ROWS = int(os.getenv("MAX_BACKLOG_ROWS", queue_size))
+BACKLOG_REPORT_INTERVAL = float(os.getenv("BACKLOG_REPORT_INTERVAL", 10))
+
+# Per-worker state while its inserts are failing: since, last_report, dropped
+insert_failures: dict[str, dict[str, float]] = {}
+
+# A session stopped while the DB was unreachable: (session_id, stopped_at),
+# ended in the DB by apply_pending_session_end() once it's back
+pending_session_end: tuple[int, float] | None = None
+
 # Swarm stacks brought up/down together with each session, via stack-controller
 MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "edge").split(",") if s.strip()]
 
@@ -93,10 +184,11 @@ async def try_backup() -> dict[str, Any]:
     await broadcast_message(misc_manager, "DB Backup Started")
 
     try:
-        db = app.state.db
+        db = require_db()
         # backup_path = db.create_backup()
         backup_path = await db.create_backup()
         await broadcast_message(misc_manager, "DB Backup Completed")
+        loggers.log_event(f"DB backup written to {backup_path}", category="backup")
 
         return {
             "success": True,
@@ -106,7 +198,7 @@ async def try_backup() -> dict[str, Any]:
 
         # Messages
         await broadcast_message(misc_manager, f"Failed to backup DB: {e}", "error")
-        loggers.log_system_logger(f"Failed to backup DB: {e}", True)
+        loggers.log_event(f"Failed to backup DB: {e}", category="backup", level=logging.ERROR)
 
         return {
             "success": False,
@@ -194,28 +286,32 @@ async def send_channel(channel: str, payload: dict) -> dict[str, bool]:
 @app.get("/backup/list")
 def list_backups() -> dict[str, list[str]]:
 
-    # Folder is attached in docker -- Must Match or else pathing errors
-    folder = Path("/db_backups")
     files = []
 
     # List all files
-    for file in folder.iterdir():
-        if file.is_file():
-          files.append(file.name)
+    try:
+        for file in BACKUP_DIR.iterdir():
+            if file.is_file():
+              files.append(file.name)
+    except OSError as e:
+        return JSONResponse(status_code=503, content={
+            "files": [], "success": False, "error": f"Backup folder {BACKUP_DIR} unavailable: {e}"})
 
     return {"files": files}
 
 # API that starts a backup
 @app.get("/backup")
 async def backup() -> dict[str, Any]:
+  require_db()
   return await try_backup()
 
 # API to attempt to restore a backup
 @app.post("/backup/restore/{filename}")
 async def restore_backup(filename: str) -> dict[str, Any]:
 
+    db = require_db()
+
     try:
-        db = app.state.db
 
         # Must Match the mounted folder shown in compose
         path = f"/db_backups/{filename}"
@@ -238,8 +334,8 @@ async def restore_backup(filename: str) -> dict[str, Any]:
 # API to get a JSON of all sessions
 @app.get("/sessions")
 async def get_sessions() -> dict[str, Any]:
+  db = require_db()
   try:
-    db = app.state.db
     data = await db.retrieve_sessions()
 
     return {"data": data, "success": True}
@@ -252,8 +348,8 @@ async def get_sessions() -> dict[str, Any]:
 # API to get the registered session label categories, for the start-session dropdown
 @app.get("/session/labels")
 async def get_session_labels() -> dict[str, Any]:
+    db = require_db()
     try:
-        db = app.state.db
         data = await db.get_session_labels()
 
         return {"data": data, "success": True}
@@ -266,7 +362,14 @@ async def get_session_labels() -> dict[str, Any]:
 # API to get the current active session if available
 @app.get("/session")
 async def get_running_session() -> dict[str, Any]:
-    
+
+    # DB unreachable: answer from the capture state (what's actually recording)
+    # rather than failing the dashboard's status poll
+    if app.state.db is None or health.components["db"]["status"] == "down":
+        sess_id = capture.session_id if capture.mode in (CaptureMode.RECORD, CaptureMode.STOPPING) else None
+        return {"id": sess_id if sess_id is not None else -404, "data": sess_id is not None,
+                "success": True, "degraded": True, "error": health.describe("db")}
+
     try:
         db = app.state.db
         sess_id = db.current_session_id
@@ -283,8 +386,8 @@ async def get_running_session() -> dict[str, Any]:
 @app.get("/imu/{label}")
 async def get_imu(label: str) -> dict[str, Any]:
 
+  db = require_db()
   try:
-    db = app.state.db
     data = await db.retrieve_imu(label)
 
     return {"data": data, "success": True}
@@ -298,8 +401,8 @@ async def get_imu(label: str) -> dict[str, Any]:
 @app.get("/camera/{label}")
 async def get_camera(label: str) -> dict[str, Any]:
 
+  db = require_db()
   try:
-    db = app.state.db
     data = await db.retrieve_camera(label)
 
     return {"data": data, "success": True}
@@ -313,8 +416,8 @@ async def get_camera(label: str) -> dict[str, Any]:
 @app.get("/robot/{label}")
 async def get_robot(label: str) -> dict[str, Any]:
 
+  db = require_db()
   try:
-    db = app.state.db
     data = await db.retrieve_robot(label)
 
     return {"data": data, "success": True}
@@ -600,6 +703,9 @@ async def start_session(
     devices: Annotated[list[str] | None, Query()] = None,
 ) -> dict[str, Any]:
 
+    # A session is a DB row -- refuse (503) before touching stacks or the gate
+    require_db()
+
     # Create new logs for this new session only
     loggers.create_loggers()
 
@@ -622,7 +728,9 @@ async def start_session(
             label=label, session_label_name=session_label, is_test_session=is_test_session, devices=selected,
         )
 
-        loggers.log_system_logger(f"System session created with label: {label} (type: {session_label})")
+        loggers.log_event(f"Session {session_id} started: {label} (type: {session_label}, "
+                          f"devices: {', '.join(sorted(selected)) if selected else 'all'})",
+                          category="session", session_id=session_id)
         loggers.cur_camera_logger.info(f"Camera session ready with label: {label}")
         loggers.cur_imu_logger.info(f"IMU session ready with label: {label}")
         loggers.cur_robot_logger.info(f"Robot session ready with label: {label}")
@@ -673,7 +781,7 @@ async def start_session(
             else:
                 await set_capture(CaptureMode.IDLE)
 
-        loggers.log_system_logger(f"Failed to start session '{label}': {e}", True)
+        loggers.log_event(f"Failed to start session '{label}': {e}", category="session", level=logging.ERROR)
         loggers.cur_camera_logger.error(f"Camera session failed to start with label: {label}. Error: {e}")
         loggers.cur_imu_logger.error(f"IMU session failed to start with label: {label}. Error: {e}")
         loggers.cur_robot_logger.error(f"Robot session failed to start with label: {label}. Error: {e}")
@@ -682,13 +790,17 @@ async def start_session(
 
         return {"error": str(e), "success": False}
 
-# API to stop a session
+# API to stop a session. Works with the DB down too: the stacks still come
+# down and the gate closes; the session row is ended once the DB is back
+# (apply_pending_session_end), with the time the stop was requested.
 @app.get("/session/stop")
 async def stop_session() -> dict[str, Any]:
+  global pending_session_end
+
+  session_id = capture.session_id
+  stopped_at = time.time()
 
   try:
-
-    db = app.state.db
 
     # Close the gate first so nothing new is queued, then stop the edge-node
     # stacks and drain whatever's still queued before ending the session --
@@ -705,15 +817,37 @@ async def stop_session() -> dict[str, Any]:
         await broadcast_message(misc_manager, f"Failed to remove '{name}' stack: {err}", "error")
         # Session/backup still proceed below either way -- surfaced as an error, not fatal.
 
-    drained, still_buffered = await drain_queues()
-    if not drained:
+    # With the DB down nothing can flush, so don't wait out the drain timeout
+    db_up = app.state.db is not None and health.components["db"]["status"] != "down"
+    drained, still_buffered = await drain_queues() if db_up else (False, ["imu", "camera", "robot"])
+    if not drained and db_up:
         loggers.log_system_logger(f"Timed out waiting for queue(s) to drain before stopping session: {', '.join(still_buffered)}", True)
         await broadcast_message(misc_manager, f"Warning: stopping session with data still buffered in: {', '.join(still_buffered)}", "error")
 
-    await db.end_session()
+    try:
+        await require_db().end_session()
+    except Exception as e:
+        if not is_db_connection_error(e) or session_id is None:
+            raise
+        pending_session_end = (session_id, stopped_at)
+        await set_capture(CaptureMode.IDLE)
+
+        msg = (f"Session {session_id} stopped, but the database is unreachable ({describe_exc(e)}). "
+               f"Its end time will be saved when the database is back; rows still buffered were not stored.")
+        loggers.log_event(msg, category="session", level=logging.WARNING, session_id=session_id)
+        await broadcast_message(misc_manager, msg, "error")
+
+        return {
+            "message": msg,
+            "success": True,
+            "degraded": True,
+            "backup": {"success": False, "error": "Skipped: database unreachable"},
+            "stack_removal_failed": failed_stacks or None,
+        }
+
     await set_capture(CaptureMode.IDLE)
 
-    loggers.log_system_logger("System session stopped successfully")
+    loggers.log_event(f"Session {session_id} stopped", category="session", session_id=session_id)
     loggers.cur_camera_logger.info(f"Camera session ended.")
     loggers.cur_imu_logger.info(f"IMU session ended.")
     loggers.cur_robot_logger.info(f"Robot session ended.")
@@ -734,7 +868,7 @@ async def stop_session() -> dict[str, Any]:
     if capture.mode != CaptureMode.IDLE:
         await set_capture(CaptureMode.IDLE)
 
-    loggers.log_system_logger(f"Failed to stop the current session: {e}", True)
+    loggers.log_event(f"Failed to stop the current session: {e}", category="session", level=logging.ERROR)
     loggers.cur_camera_logger.error(f"Camera session failed to stop. Error: {e}")
     loggers.cur_imu_logger.error(f"IMU session failed to stop. Error: {e}")
     loggers.cur_robot_logger.error(f"Robot session failed to stop. Error: {e}")
@@ -743,31 +877,238 @@ async def stop_session() -> dict[str, Any]:
 
     return {"error": str(e), "success": False}
 
-# FastAPI Startup
+# Ends a session whose stop was requested while the DB was down. Called on
+# every DB (re)connect; a failure keeps it pending for the next one.
+async def apply_pending_session_end() -> None:
+    global pending_session_end
+
+    if pending_session_end is None or app.state.db is None:
+        return
+
+    session_id, stopped_at = pending_session_end
+    try:
+        await app.state.db.end_session_at(session_id, stopped_at)
+    except Exception as e:
+        loggers.log_event(f"Still can't save the end of session {session_id}: {describe_exc(e)}",
+                          category="session", level=logging.WARNING, important=False, session_id=session_id)
+        return
+
+    pending_session_end = None
+    msg = f"Saved the end of session {session_id} (stopped while the database was down)"
+    loggers.log_event(msg, category="session", session_id=session_id)
+    await broadcast_message(misc_manager, msg, "info")
+
+# Background tasks started at boot -- kept referenced so they aren't GC'd
+_background_tasks: set[asyncio.Task] = set()
+
+def start_background(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+# Runs a long-lived loop and restarts it (with backoff) if it ever raises, so a
+# bug or a dropped connection can't silently kill a worker for good
+async def run_forever(name: str, loop_fn) -> None:
+    failures = 0
+    while True:
+        try:
+            await loop_fn()
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            failures += 1
+            delay = backoff_delay(failures)
+            loggers.log_event(f"{name} crashed ({describe_exc(e)}), restarting in {delay}s",
+                              category="system", level=logging.ERROR, task=name, failures=failures)
+            await asyncio.sleep(delay)
+
+# FastAPI Startup -- returns immediately. The DB and MQTT broker are connected
+# by background supervisors that retry with backoff, so the API (and the
+# dashboard behind it) is up even while either is unreachable.
 @app.on_event("startup")
 async def startup():
 
-    # Creates a DB singleton to be used in API calls
-    app.state.db = await DatabaseSingleton.get_instance()
-
     # Creates the loggers instances to be ready
     loggers.create_loggers()
+    loggers.log_event("fastapi-app starting", category="system")
 
-    # Resume recording if a session was left open (e.g. fastapi-app restarted
-    # mid-session); otherwise start idle. Always set() so the version is fresh.
+    # Idle until the DB says otherwise. Always set() so the version is fresh --
+    # tcp_server may still hold a RECORD state from before a restart.
+    await set_capture(CaptureMode.IDLE)
+
+    start_background(db_supervisor())
+    start_background(mqtt_supervisor())
+    start_background(health_monitor())
+
+# Connects to the DB, retrying with backoff until it works, then resumes an
+# open session and starts the IMU/camera workers. Later outages are spotted by
+# health_monitor(); asyncpg's pool reconnects on its own once the DB is back.
+async def db_supervisor() -> None:
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            db = await DatabaseSingleton.get_instance()
+            break
+        except Exception as e:
+            delay = backoff_delay(attempt)
+            reason = describe_db_error(e)
+            loggers.log_event(f"DB connect attempt {attempt} failed: {reason} -- retrying in {delay}s",
+                              category="health", level=logging.WARNING, important=False, component="db")
+            await health.down("db", reason, attempts=attempt, retry_in=delay,
+                              host=os.getenv("DB_HOST"), port=os.getenv("DB_PORT"))
+            await asyncio.sleep(delay)
+
+    app.state.db = db
+    await health.ok("db", host=os.getenv("DB_HOST"), port=os.getenv("DB_PORT"))
+
+    await apply_pending_session_end()
     await restore_capture()
 
     # Creates workers for IMU and CAMERA
-    asyncio.create_task(camera_worker(batch_size=int(os.getenv("BATCHES", 50)), flush_interval=float(os.getenv("B_TIMEOUT"))))
-    asyncio.create_task(imu_worker(batch_size=int(os.getenv("BATCHES", 50)), flush_interval=float(os.getenv("B_TIMEOUT"))))
+    batch_size = int(os.getenv("BATCHES", 50))
+    flush_interval = float(os.getenv("B_TIMEOUT", 2.0))
+    start_background(run_forever("camera_worker", lambda: camera_worker(batch_size=batch_size, flush_interval=flush_interval)))
+    start_background(run_forever("imu_worker", lambda: imu_worker(batch_size=batch_size, flush_interval=flush_interval)))
 
-# Sets the capture state from the DB: RECORD if a session is open, else IDLE
+# Makes the first MQTT connection, retrying with backoff. After that gmqtt
+# reconnects by itself (reconnect_retries=-1); this loop only reports status.
+async def mqtt_supervisor() -> None:
+    attempt = 0
+    connected_once = False
+    target = f"{mqtt_config.host}:{mqtt_config.port}"
+
+    while True:
+        if mqtt.client.is_connected:
+            connected_once = True
+            attempt = 0
+            await health.ok("mqtt", broker=target, topics=sorted(mqtt.subscriptions))
+            await asyncio.sleep(5)
+            continue
+
+        attempt += 1
+        if connected_once:
+            await health.down("mqtt", f"connection to {target} lost, reconnecting", attempts=attempt, broker=target)
+            await asyncio.sleep(5)
+            continue
+
+        try:
+            await asyncio.wait_for(mqtt.mqtt_startup(), timeout=10)
+        except Exception as e:
+            delay = backoff_delay(attempt)
+            loggers.log_event(f"MQTT connect attempt {attempt} to {target} failed: {describe_exc(e)} -- retrying in {delay}s",
+                              category="health", level=logging.WARNING, important=False, component="mqtt")
+            await health.down("mqtt", f"can't connect to {target}: {describe_exc(e)}", attempts=attempt,
+                              retry_in=delay, broker=target)
+            await asyncio.sleep(delay)
+
+def _probe_backup_dir() -> str:
+    probe = BACKUP_DIR / f".health-{os.getpid()}"
+    probe.write_text("ok")
+    probe.unlink()
+    return str(BACKUP_DIR)
+
+_backup_probe = PathProbe(_probe_backup_dir, timeout=5)
+
+# Re-checks every dependency each HEALTH_INTERVAL s and records the result
+async def health_monitor() -> None:
+
+    async def check_db() -> None:
+        db = app.state.db
+        if db is None:
+            return  # db_supervisor reports until the first connect
+        try:
+            await asyncio.wait_for(db.pool.fetchval("SELECT 1"), timeout=3)
+        except Exception as e:
+            await health.down("db", describe_db_error(e), retry_in=HEALTH_INTERVAL,
+                              host=os.getenv("DB_HOST"), port=os.getenv("DB_PORT"))
+            return
+        was_down = health.components["db"]["status"] == "down"
+        await health.ok("db", host=os.getenv("DB_HOST"), port=os.getenv("DB_PORT"))
+        if was_down:
+            await apply_pending_session_end()
+
+    async def check_stack_controller() -> None:
+        host = os.getenv("STACK_CONTROLLER_HOST", "stack-controller")
+        port = os.getenv("STACK_CONTROLLER_PORT", "8080")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://{host}:{port}/health", timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"/health returned {resp.status}")
+        except Exception as e:
+            await health.down("stack_controller", f"{host}:{port} unreachable: {describe_exc(e)}", retry_in=HEALTH_INTERVAL)
+            return
+        await health.ok("stack_controller")
+
+    async def check_tcp() -> None:
+        status = await get_robot_queue_status()
+        if "error" in status:
+            await health.down("tcp", f"tcp status server unreachable: {status['error']}", retry_in=HEALTH_INTERVAL)
+            return
+        tcp_db = status.get("db") or {}
+        if tcp_db.get("status") == "down":
+            await health.down("tcp", f"tcp can't reach the database: {tcp_db.get('error')}",
+                              retry_in=HEALTH_INTERVAL, connections=status.get("connections"))
+            return
+        await health.ok("tcp", connections=status.get("connections"), depth=status.get("depth"))
+
+    async def check_logs() -> None:
+        status = loggers.file_logging_status()
+        if status["ok"]:
+            await health.ok("logs", dir=status["dir"], dropped=status["dropped"])
+        else:
+            await health.down("logs", f"can't write {status['dir']}, logging to stdout only: {status['error']}",
+                              dir=status["dir"], dropped=status["dropped"])
+
+    async def check_backups() -> None:
+        try:
+            await _backup_probe.run()
+        except Exception as e:
+            await health.down("backups", f"backup folder {BACKUP_DIR} not writable: {describe_exc(e)}",
+                              retry_in=HEALTH_INTERVAL)
+            return
+        await health.ok("backups", dir=str(BACKUP_DIR))
+
+    checks = (check_db, check_stack_controller, check_tcp, check_logs, check_backups)
+    while True:
+        results = await asyncio.gather(*(check() for check in checks), return_exceptions=True)
+        for check, result in zip(checks, results):
+            if isinstance(result, Exception):
+                loggers.log_event(f"Health check {check.__name__} failed: {describe_exc(result)}",
+                                  category="health", level=logging.ERROR, important=False)
+        await asyncio.sleep(HEALTH_INTERVAL)
+
+# Liveness + dependency report. Always 200 while the process is alive (it's
+# also the container healthcheck); "overall" is ok/degraded/starting.
+@app.get("/health")
+async def get_health() -> dict[str, Any]:
+    return {
+        **health.snapshot(),
+        "capture": capture.to_dict(),
+        "pending_session_end": pending_session_end[0] if pending_session_end else None,
+        "backlog": {
+            name: {"since": f["since"], "dropped": f["dropped"]} for name, f in insert_failures.items()
+        },
+    }
+
+# Sets the capture state from the DB: RECORD if a session is open, else IDLE.
+# Skipped if monitoring was started while the DB was still unreachable.
 async def restore_capture() -> None:
     try:
         session_id = await app.state.db.get_latest_session()
     except Exception as e:
         loggers.log_system_logger(f"Could not check for an open session at startup: {e}", True)
         session_id = None
+
+    if capture.mode == CaptureMode.MONITOR:
+        if session_id:
+            loggers.log_event(f"Session {session_id} is still open in the database, but monitoring started while "
+                              f"the database was down; leaving monitor mode as is -- stop it from the dashboard if it's stale",
+                              category="session", level=logging.WARNING, session_id=session_id)
+        return
 
     if session_id:
         try:
@@ -777,12 +1118,19 @@ async def restore_capture() -> None:
             loggers.log_system_logger(f"Could not read device selection for session {session_id}: {e}", True)
             devices = None
         await set_capture(CaptureMode.RECORD, session_id=session_id, devices=devices)
+        loggers.log_event(f"Resumed recording session {session_id} (was open at startup)",
+                          category="session", session_id=session_id)
     else:
         await set_capture(CaptureMode.IDLE)
 
 # FastAPI Shutdown
 @app.on_event("shutdown")
 async def shutdown_event():
+    loggers.log_event("fastapi-app shutting down", category="system")
+    try:
+        await mqtt.mqtt_shutdown()
+    except Exception:
+        pass
     await DatabaseSingleton.close()
 
 def format_imu_sample(d: dict[str, Any]) -> str:
@@ -822,13 +1170,38 @@ async def flush_batch(batch, insert_batch, name, logger, manager) -> bool:
         await broadcast_message(manager, f"{name} batch of {len(current)} dropped: no active session", "error")
         return True
     except Exception as e:
-        logger.error(f"{name} batch insert failed: {e}")
-        await broadcast_message(manager, f"{name} batch insert failed: {e}", "error")
+        now = time.time()
+        failing = insert_failures.setdefault(name, {"since": now, "last_report": 0.0, "dropped": 0})
+        # One report per BACKLOG_REPORT_INTERVAL, not one per retry
+        if now - failing["last_report"] >= BACKLOG_REPORT_INTERVAL:
+            failing["last_report"] = now
+            msg = (f"{name} inserts failing for {describe_age(now - failing['since'])} ({describe_exc(e)}) -- "
+                   f"holding {len(batch)} rows" + (f", dropped {failing['dropped']}" if failing["dropped"] else ""))
+            logger.error(msg)
+            loggers.log_event(msg, category="ingest", level=logging.ERROR, worker=name,
+                              rows_held=len(batch), dropped=failing["dropped"])
+            await broadcast_message(manager, msg, "error")
         return False
+
+    failing = insert_failures.pop(name, None)
+    if failing:
+        msg = (f"{name} inserts recovered after {describe_age(time.time() - failing['since'])}"
+               + (f" ({failing['dropped']} rows dropped while failing)" if failing["dropped"] else ""))
+        loggers.log_event(msg, category="ingest", worker=name, dropped=failing["dropped"])
+        await broadcast_message(manager, msg, "info")
 
     logger.info(f"Inserted {len(current)} {name} rows")
     await broadcast_message(manager, f"Inserted {len(current)} {name} rows")
     return True
+
+# Keeps a failing worker's batch at MAX_BACKLOG_ROWS by dropping the oldest rows
+def trim_backlog(batch: list, name: str, logger) -> None:
+    overflow = len(batch) - MAX_BACKLOG_ROWS
+    if overflow > 0:
+        del batch[:overflow]
+        failing = insert_failures.setdefault(name, {"since": time.time(), "last_report": 0.0, "dropped": 0})
+        failing["dropped"] += overflow
+        logger.warning(f"{name} backlog over {MAX_BACKLOG_ROWS} rows, dropped the oldest {overflow}")
 
 # Camera Worker
 async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
@@ -859,6 +1232,8 @@ async def camera_worker(batch_size=50, flush_interval=2.0) -> None:
                 camera_pending = 0
                 last_flush = now
             else:
+                trim_backlog(batch, "CAMERA", loggers.cur_camera_logger)
+                camera_pending = len(batch)
                 await asyncio.sleep(1)
 
 # IMU Worker
@@ -890,6 +1265,8 @@ async def imu_worker(batch_size=50, flush_interval=2.0) -> None:
                 imu_pending = 0
                 last_flush = now
             else:
+                trim_backlog(batch, "IMU", loggers.cur_imu_logger)
+                imu_pending = len(batch)
                 await asyncio.sleep(1)
 
 # MQTT Subscription for IMU device topics

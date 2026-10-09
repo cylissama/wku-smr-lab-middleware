@@ -36,15 +36,16 @@ Built locally from the repo (not a NAS/registry service). Connects out to Postgr
 
 Built with a large set of build **args**, because Vite bakes environment values into the static bundle at build time rather than reading them at runtime: `HOST_IP`, `FASTAPI_PORT`, `VITE_API_URL`, `VITE_WS_URL`, `VITE_AI_URL`, `VITE_TWINS_URL`, `VITE_ROBOT_CAMERA_URL`, `VITE_DB_GUI_URL`. This means **the frontend must be rebuilt** any time one of these values changes — see the "SOP: Mockup to Production Cutover" document in the dashboard's Info library for the full list of environment-driven service links.
 
-nginx inside this container (`web/nginx.conf`) does three things:
+nginx inside this container (`web/nginx.conf`) does four things:
 
-- proxies `/api/` to `fastapi-app:8000`
+- proxies `/api/` to `fastapi-app:8000`, looking the name up **per request** (Docker's DNS at `127.0.0.11`), so `web` starts and keeps serving even while `fastapi-app` is down; API calls then get a JSON 503 saying so
+- proxies the two read-only routes `/api/system/containers` and `/api/system/logs` to `stack-controller:8080` for the dashboard's Container Health and Logs boxes (GET only; stack-controller's deploy routes are not exposed)
 - serves `/docs/` (this site) with SPA fallback to `docs/index.html`
 - serves everything else as the dashboard SPA, with `/info/manifest.json` explicitly marked no-cache so the document library always reflects the latest build
 
 ### `tcp`
 
-Same `.env`-driven configuration pattern as `fastapi-app`, listening on `ROBOT_TCP_PORT` (default `5001`).
+Same `.env`-driven configuration pattern as `fastapi-app`, listening on `ROBOT_TCP_PORT` (default `5001`). Its log files go to `LOG_DIR=/tcp-server/logs`, which is where the `logs` NFS volume is mounted.
 
 ### `pgadmin`
 
@@ -57,6 +58,16 @@ The lab's pgAdmin, moved off the NAS into this stack. Published on `PGADMIN_PORT
 ### `ntp`
 
 Runs with `SYS_NICE`/`SYS_TIME` capabilities and mounts the host's `/etc/localtime` read-only. See [Automations](/docker/automations) for why this exists.
+
+## Health, restarts and logs
+
+Every container is set up to come back by itself and to say why it isn't working. The details are in [Health & logs](/docker/health-and-logs). In short:
+
+- **Nothing waits on the database, NAS or broker to start.** `fastapi-app` and `tcp` connect in the background and keep retrying; `web` has no `depends_on` and doesn't need `fastapi-app` to be up.
+- **`restart: unless-stopped`** on every service, so a crashed container is restarted.
+- **Docker health checks** on `mqtt-broker`, `fastapi-app`, `tcp`, `web` (plus the existing ones on `stack-controller`, `pgadmin`, `ntp`), all sharing the `x-healthcheck-timing` settings. "Healthy" means the container itself works, not that its dependencies are up.
+- **Labels**: `smr.monitor: "true"` shows a container in the dashboard's Container Health and Logs boxes; `smr.autoheal: "true"` lets stack-controller's watchdog restart it when it goes `unhealthy` (plain Compose never does). `stack-controller` itself is monitored but not auto-restarted.
+- **Log rotation**: `x-logging` caps Docker's own logs at 5 × 10 MB per container.
 
 ## Volumes
 

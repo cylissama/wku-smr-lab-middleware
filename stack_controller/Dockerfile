@@ -6,6 +6,7 @@ WORKDIR /app
 COPY stack_controller/requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
+COPY common ./common
 COPY stack_controller ./stack_controller
 
 EXPOSE 8080

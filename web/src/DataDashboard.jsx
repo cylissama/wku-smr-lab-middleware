@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import MessageWB from "./components/MessageWB";
 import StatusIndicator from "./components/StatusIndicator";
 import BackupCard from "./components/BackupCard";
 import DashboardPanel from "./components/DashboardPanel";
 import DeviceSelector from "./components/DeviceSelector";
+import ContainerHealth from "./components/ContainerHealth";
+import LogsPanel from "./components/LogsPanel";
+import { HealthDetails, HealthStrip } from "./components/SystemHealth";
+import { healthProblems } from "./lib/systemHealth";
+import useSystemHealth from "./hooks/useSystemHealth";
+import { reportDashboardError } from "./api/dashboardEvents";
 import {
     getSessionLabels,
     getSessionStatus,
@@ -93,7 +99,27 @@ export default function DataDashboard() {
     const [isDevicesLoading, setIsDevicesLoading] = useState(true);
     const hasInitialDeviceSelection = useRef(false);
 
+    // fastapi-app's dependency report; session actions need the database
+    const systemHealth = useSystemHealth(5000);
+    const [isHealthExpanded, setIsHealthExpanded] = useState(false);
+    // Container picked with "Show logs" in the Container Health box
+    const [logsFocus, setLogsFocus] = useState(null);
+    const clearLogsFocus = useCallback(() => setLogsFocus(null), []);
+    const dbHealth = systemHealth.health?.components?.db;
+    const dbUp = !systemHealth.apiError && dbHealth?.status === "ok";
+    const dbUnavailableReason = systemHealth.apiError
+        ? "The API is unreachable"
+        : dbHealth?.status === "down"
+          ? `Database unavailable: ${dbHealth.error}`
+          : "Waiting for the database connection";
+    const showHealthDetails = isHealthExpanded || healthProblems(systemHealth).length > 0;
+
+    // Errors are also kept in the browser, so they're visible when the API
+    // (which broadcasts them to the message boxes) is the thing that's down
     const sendMessage = async (dest, type, msg) => {
+        if (type === "error") {
+            reportDashboardError(msg);
+        }
         try {
             await sendDashboardMessage(dest, type, msg);
         } catch (err) {
@@ -132,8 +158,12 @@ export default function DataDashboard() {
             const capture = await getCapture();
             setCaptureMode(capture.mode);
             setCaptureDevices(capture.devices ?? null);
-        } catch {
-            // stay quiet on poll failures — the initial load effect already surfaces errors
+        } catch (e) {
+            // An unreachable API is already shown by the System Health strip;
+            // anything else gets recorded with the dashboard's own errors
+            if (!(e instanceof TypeError)) {
+                reportDashboardError(`Session status poll failed: ${getErrorMessage(e)}`);
+            }
         }
     };
 
@@ -142,7 +172,14 @@ export default function DataDashboard() {
     return () => clearInterval(intervalId);
 }, []);
 
+    // (Re)loaded whenever the database (re)connects -- with it down there's
+    // nothing to load, and the page must not wait on it
     useEffect(() => {
+        if (!dbUp) {
+            setIsLatestSessionLoading(false);
+            return;
+        }
+
         const getLatestSession = async () => {
             setIsLatestSessionLoading(true);
 
@@ -167,7 +204,7 @@ export default function DataDashboard() {
         };
 
         getLatestSession();
-    }, []);
+    }, [dbUp]);
 
     // Refresh device states every 3 s while monitoring/recording (so "receiving"
     // shows up quickly), every 10 s when idle
@@ -203,6 +240,11 @@ export default function DataDashboard() {
     }, [captureMode]);
 
     useEffect(() => {
+        if (!dbUp) {
+            setIsSessionLabelsLoading(false);
+            return;
+        }
+
         const loadSessionLabels = async () => {
             setIsSessionLabelsLoading(true);
 
@@ -227,7 +269,7 @@ export default function DataDashboard() {
         };
 
         loadSessionLabels();
-    }, []);
+    }, [dbUp]);
 
     const allDeviceKeys = devices.map((device) => device.key);
     const selectedCount = allDeviceKeys.filter((key) => selectedDevices.has(key)).length;
@@ -353,9 +395,10 @@ export default function DataDashboard() {
 
     const isActionDisabled = isStatusLoading || isLatestSessionLoading || isSessionLabelsLoading;
     const canStartSession =
-        !activeSession && !isActionDisabled && !isMonitorBusy && hasDeviceSelection && Boolean(selectedSessionLabel);
+        dbUp && !activeSession && !isActionDisabled && !isMonitorBusy && hasDeviceSelection && Boolean(selectedSessionLabel);
     const isMonitoring = captureMode === "monitor";
     const canToggleMonitoring =
+        !systemHealth.apiError &&
         !isActionDisabled &&
         !isMonitorBusy &&
         (isMonitoring || (captureMode === "idle" && !activeSession && hasDeviceSelection));
@@ -385,7 +428,7 @@ export default function DataDashboard() {
                                         Most Recent Session:{" "}
                                         {isLatestSessionLoading
                                             ? "Loading..."
-                                            : latestSession || "None"}
+                                            : latestSession || (dbUp ? "None" : "Unavailable")}
                                     </div>
                                 </div>
                             </div>
@@ -395,11 +438,16 @@ export default function DataDashboard() {
                                     className="w-48 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 disabled:cursor-not-allowed disabled:bg-gray-100"
                                     value={selectedSessionLabel}
                                     onChange={(event) => setSelectedSessionLabel(event.target.value)}
-                                    disabled={activeSession || isActionDisabled}
+                                    disabled={activeSession || isActionDisabled || !dbUp}
+                                    title={dbUp ? undefined : dbUnavailableReason}
                                 >
                                     {sessionLabelOptions.length === 0 && (
                                         <option value="">
-                                            {isSessionLabelsLoading ? "Loading labels..." : "No labels available"}
+                                            {isSessionLabelsLoading
+                                            ? "Loading labels..."
+                                            : dbUp
+                                              ? "No labels available"
+                                              : "Database unavailable"}
                                         </option>
                                     )}
                                     {sessionLabelOptions.map((option) => (
@@ -434,6 +482,7 @@ export default function DataDashboard() {
                                             isStartButtonShaking ? "animate-wiggle" : ""
                                         }`}
                                         disabled={!canStartSession}
+                                        title={dbUp ? undefined : `Can't start a session: ${dbUnavailableReason}`}
                                         onClick={handleStartSessionClick}
                                         onAnimationEnd={() => setIsStartButtonShaking(false)}
                                     >
@@ -503,8 +552,23 @@ export default function DataDashboard() {
                                 </button>
                             </div>
                         </div>
+
+                        <div className="border-t border-gray-200 pt-3">
+                            <HealthStrip
+                                {...systemHealth}
+                                expanded={showHealthDetails}
+                                // Problems keep the details open, so no toggle then
+                                onToggle={
+                                    healthProblems(systemHealth).length > 0
+                                        ? undefined
+                                        : () => setIsHealthExpanded((open) => !open)
+                                }
+                            />
+                        </div>
                     </div>
                 </div>
+
+                {showHealthDetails && <HealthDetails {...systemHealth} />}
 
                 <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm lg:p-5">
                     <DeviceSelector
@@ -518,7 +582,8 @@ export default function DataDashboard() {
                     />
                 </div>
 
-                {dashboardError && (
+                {/* While the API is unreachable the System Health card already says so */}
+                {dashboardError && !systemHealth.apiError && (
                     <div className="mb-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-sm">
                         {dashboardError}
                     </div>
@@ -542,7 +607,18 @@ export default function DataDashboard() {
                     </DashboardPanel>
 
                     <DashboardPanel className="xl:col-span-2">
-                        <BackupCard sendMessage={sendMessage} />
+                        <BackupCard sendMessage={sendMessage} dbUp={dbUp} dbUnavailableReason={dbUnavailableReason} />
+                    </DashboardPanel>
+                </div>
+
+                {/* Served by stack-controller through nginx, so both keep working while the API is down */}
+                <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-5">
+                    <DashboardPanel className="xl:col-span-2">
+                        <ContainerHealth onShowLogs={setLogsFocus} />
+                    </DashboardPanel>
+
+                    <DashboardPanel className="xl:col-span-3">
+                        <LogsPanel focusSource={logsFocus} onFocusHandled={clearLogsFocus} />
                     </DashboardPanel>
                 </div>
             </div>

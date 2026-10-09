@@ -64,6 +64,8 @@ class DatabaseSingleton:
                 if cls._instance is None:
 
                     # Uses pools to only have a set number of connections that are available... Can be increase to allow more devices if needed
+                    # DB_CONNECT_TIMEOUT keeps an unreachable DB from stalling callers
+                    # for asyncpg's default 60 s -- callers retry on their own
                     pool = await asyncpg.create_pool(
                         host=os.getenv("DB_HOST"),
                         port=int(os.getenv("DB_PORT")),
@@ -72,6 +74,7 @@ class DatabaseSingleton:
                         password=os.getenv("DB_PASSWORD"),
                         min_size=min_size,
                         max_size=max_size,
+                        timeout=float(os.getenv("DB_CONNECT_TIMEOUT", 5)),
                     )
 
                     cls._instance = cls(pool)
@@ -241,7 +244,8 @@ class DatabaseSingleton:
             "-f", str(out),
         ]
 
-        env = {**os.environ, "PGPASSWORD": os.environ["PGPASSWORD"]}
+        # PGCONNECT_TIMEOUT: fail fast instead of hanging if the DB just went away
+        env = {**os.environ, "PGPASSWORD": os.environ["PGPASSWORD"], "PGCONNECT_TIMEOUT": os.getenv("PGCONNECT_TIMEOUT", "10")}
         await asyncio.to_thread(subprocess.run,cmd,check=True,env=env) # fix
 	# subprocess.run(cmd, check=True, env=env)
         return str(out)
@@ -803,6 +807,26 @@ class DatabaseSingleton:
             )
         
         self.current_session_id = None
+
+    # Ends a specific session at a given time -- for a stop that was requested
+    # while the DB was unreachable and is applied once it's back. Leaves an
+    # already-ended session alone.
+    async def end_session_at(self, session_id: int, ended_at: float) -> None:
+
+        async with self.pool.acquire() as conn:
+
+            await conn.execute(
+                """
+                UPDATE "session"
+                SET ended_at = $1
+                WHERE id = $2 AND ended_at IS NULL
+                """,
+                ended_at,
+                session_id
+            )
+
+        if self.current_session_id == session_id:
+            self.current_session_id = None
 
     # Inserts a new device into the DB & Return the id
     async def insert_device(self, label, category, ip_address) -> int:

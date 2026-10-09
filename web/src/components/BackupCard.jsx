@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api/apiClient";
 
-export default function BackupCard({sendMessage}) {
+// Creating/restoring a backup needs the database (dbUp); listing only needs
+// the backup folder on the NAS, so it still works without it
+export default function BackupCard({sendMessage, dbUp = true, dbUnavailableReason = ""}) {
 
     const boxRef = useRef(null);
     const [backupFiles, setBackupFiles] = useState([]);
     const [refreshBool, setRefreshBool] = useState(false);
     const [backuping, setBackuping] = useState(false);
     const [isRecovering, setIsRecovering] = useState(false);
+    const [listError, setListError] = useState("");
 
     useEffect(() => {
             boxRef.current?.scrollTo({
@@ -30,9 +33,12 @@ export default function BackupCard({sendMessage}) {
 
             const data = await apiGet("/backup/list");
             setBackupFiles(data.files);
+            setListError("");
 
         } catch (err) {
-            sendMessage("misc", "error", "An Unknown Error Occurred: " + err);
+            const message = err instanceof Error ? err.message : String(err);
+            setListError(message);
+            sendMessage("misc", "error", "Couldn't list backups: " + message);
         }
     };
 
@@ -98,7 +104,8 @@ export default function BackupCard({sendMessage}) {
                 <button
                     className="flex items-center gap-1 text-white bg-yellow-500 hover:bg-yellow-600 text-sm px-2 py-1 rounded font-semibold leading-tight cursor-pointer active:scale-95 transition-transform duration-100 disabled:bg-gray-400 disabled:cursor-not-allowed"
                     onClick={() => {restoreBackup(name)}}
-                    disabled={isRecovering}
+                    disabled={isRecovering || !dbUp}
+                    title={dbUp ? undefined : dbUnavailableReason}
                     >
                     Recover
                 </button>
@@ -116,6 +123,8 @@ export default function BackupCard({sendMessage}) {
                     className="bg-gray-900 font-mono text-sm text-white rounded-md p-3 h-64 overflow-y-auto overflow-x-auto space-y-3 whitespace-pre text-left w-full"
                 >
                     
+                    {listError && <p className="whitespace-normal text-red-400">{listError}</p>}
+
                     {backupFiles.map((file) => (
                         <BackupInfo key={file} name={file} />
                     ))}
@@ -128,7 +137,8 @@ export default function BackupCard({sendMessage}) {
                     <button
                         className="flex items-center gap-1 text-white bg-blue-500 hover:bg-blue-600 text-sm px-2 py-1 mt-4 rounded font-semibold leading-tight cursor-pointer active:scale-95 transition-transform duration-100 disabled:bg-gray-400 disabled:cursor-not-allowed"
                         onClick={() => {createBackup()}}
-                        disabled={backuping}
+                        disabled={backuping || !dbUp}
+                        title={dbUp ? undefined : dbUnavailableReason}
                         >
                         Create Backup
                     </button>

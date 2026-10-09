@@ -53,6 +53,7 @@ export default defineConfig({
           { text: 'Compose', link: '/docker/compose' },
           { text: 'Swarm', link: '/docker/swarm' },
           { text: 'Stack controller & device selection', link: '/docker/stack-controller' },
+          { text: 'Health & logs', link: '/docker/health-and-logs' },
           { text: 'Automations', link: '/docker/automations' },
           { text: 'TCP Server', link: '/docker/tcp-server' },
           { text: 'Portainer', link: '/docker/portainer' },
@@ -77,6 +78,7 @@ export default defineConfig({
         text: 'Operations',
         items: [
           { text: 'Running a test session', link: '/operations/running-a-test' },
+          { text: 'Troubleshooting', link: '/operations/troubleshooting' },
           { text: 'Camera live feed', link: '/operations/camera-ops' },
         ],
       },
