@@ -77,7 +77,7 @@ export default function MessageWB({ type }) {
                         {capitalizeType} Messages
                     </h3>
                     <p className="text-xs text-gray-500">
-                        Live message feed and recent history
+                        Live message feed
                     </p>
                 </div>
 
@@ -126,15 +126,6 @@ export default function MessageWB({ type }) {
                         onClick={() => setRefreshTemp((prev) => !prev)}
                     >
                         Refresh
-                    </button>
-
-                    <button
-                        type="button"
-                        className="rounded-md bg-slate-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition disabled:cursor-not-allowed disabled:bg-slate-400"
-                        disabled
-                        title="No historical message endpoint is available for this channel yet."
-                    >
-                        Recent Unavailable
                     </button>
 
                     <button

@@ -5,6 +5,13 @@ import "./App.css";
 const AI_URL = import.meta.env.VITE_AI_URL;
 const TWINS_URL = import.meta.env.VITE_TWINS_URL;
 
+// Every nav item shares one size; only the colors differ for the current page.
+const NAV_ITEM =
+  "inline-flex h-9 w-36 items-center justify-center rounded-md border text-sm font-medium transition";
+const NAV_ACTIVE = "border-cyan-500 bg-cyan-600 text-white shadow-sm";
+const NAV_IDLE =
+  "border-slate-600 bg-slate-800 text-slate-100 hover:border-cyan-500 hover:bg-slate-700";
+
 function App() {
   function topBar() {
     return (
@@ -12,27 +19,21 @@ function App() {
         <div className="mx-auto flex max-w-7xl flex-row items-center justify-between">
           <h2 className="text-lg font-semibold tracking-wide">Smart Manufacturing Research</h2>
 
-          <div className="flex items-center gap-4">
-
-            <button className="flex items-center gap-1 rounded bg-white px-3 py-2 text-slate-900 transition">
+          <div className="flex items-center gap-3">
+            <a href="/" aria-current="page" className={`${NAV_ITEM} ${NAV_ACTIVE}`}>
               Data Dashboard
-            </button>
+            </a>
 
-            <button
-              className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-white transition hover:bg-cyan-500"
-              onClick={() => {
-                window.location.href = "/docs/";
-              }}
-            >
+            <a href="/docs/" className={`${NAV_ITEM} ${NAV_IDLE}`}>
               Documentation
-            </button>
+            </a>
 
             {AI_URL ? (
               <a
                 href={AI_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1 rounded bg-cyan-600 p-2 text-white transition hover:bg-cyan-500"
+                className={`${NAV_ITEM} ${NAV_IDLE}`}
               >
                 AI
               </a>
@@ -43,7 +44,7 @@ function App() {
                 href={TWINS_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1 rounded bg-cyan-600 p-2 text-white transition hover:bg-cyan-500"
+                className={`${NAV_ITEM} ${NAV_IDLE}`}
               >
                 Twins
               </a>

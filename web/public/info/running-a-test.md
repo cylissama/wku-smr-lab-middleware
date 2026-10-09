@@ -16,7 +16,7 @@ All operations listed here are assumed to be run on the Alienware PC (Cy's dev P
 
 ## 1 Initialize the middleware
 
-The middleware (Data Broker) is running on the MiniPC 2 downstairs. This should already be active, as we do not ever shut it off. To check, visit the [Dashboard](http://192.168.1.76/data/dashboard). If that dashboard is not reachable, then continue. If it is reachable and displaying green lights, skip to step 2.
+The middleware (Data Broker) is running on the MiniPC 2 downstairs. This should already be active, as we do not ever shut it off. To check, visit the [Dashboard](http://192.168.2.100/). If that dashboard is not reachable, then continue. If it is reachable and displaying green lights, skip to step 2.
 
 To initialize the middleware you must ssh into the machine and run a docker compose up command. This can be done anywhere on the network but, as stated, this is currently being executed on the Alienware PC in the upstairs lab.
 
@@ -76,7 +76,7 @@ Run process:
 docker compose up -d
 ```
 
-Now we are done setting up the middleware. The [Dashboard](http://192.168.1.76/data/dashboard) should now be active.
+Now we are done setting up the middleware. The [Dashboard](http://192.168.2.100/) should now be active.
 
 ## 2. Initialize the device nodes
 

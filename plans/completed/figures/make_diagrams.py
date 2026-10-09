@@ -1,7 +1,7 @@
-"""Draws the UML / flow figures for plans/listener-switch-plan.md.
+"""Draws the UML / flow figures for plans/completed/listener-switch-plan.md.
 
 Run from anywhere with matplotlib installed:
-    python plans/figures/make_diagrams.py
+    python plans/completed/figures/make_diagrams.py
 PNGs are written next to this script.
 """
 from pathlib import Path

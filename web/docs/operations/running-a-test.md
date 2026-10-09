@@ -17,7 +17,7 @@ Current as of Apr 20, 2026. This replaces the older per-device `docker compose -
 
 ## 1. Initialize the middleware
 
-The middleware runs on the MiniPC at `192.168.1.76` and is normally already up — check the [Dashboard](http://192.168.1.76/data/dashboard) first. If it's reachable and showing healthy listeners, skip to step 2. Otherwise, SSH into the middleware host (credentials via the lab's password manager, not written here) and start it:
+The middleware runs on the MiniPC at `192.168.1.76` and is normally already up — check the [Dashboard](http://192.168.2.100/) first. If it's reachable and showing healthy listeners, skip to step 2. Otherwise, SSH into the middleware host (credentials via the lab's password manager, not written here) and start it:
 
 ```bash
 ssh data-team@192.168.1.76
@@ -144,7 +144,7 @@ Then click **Stop Session**. It stops accepting new data first, then waits (up t
 ## 10. Review data
 
 - [Database Browser](http://192.168.2.100:5050/browser/)
-- [Dashboard](http://192.168.1.76/data/dashboard)
+- [Dashboard](http://192.168.2.100/)
 
 ## Quick reference
 

@@ -6,7 +6,7 @@ from typing import Any
 
 # What happens to incoming device data. fastapi-app owns the real state and
 # pushes a copy to tcp_server (PUT /capture), which also re-syncs from
-# GET /capture -- see plans/listener-switch-plan.md.
+# GET /capture -- see plans/completed/listener-switch-plan.md.
 class CaptureMode(str, Enum):
     IDLE = "idle"          # nothing listened to or stored
     MONITOR = "monitor"    # live view only, nothing stored

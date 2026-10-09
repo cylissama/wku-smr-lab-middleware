@@ -477,13 +477,6 @@ export default function DataDashboard() {
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
-                                    className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-                                >
-                                    Clear Cache [WIP]
-                                </button>
-
-                                <button
-                                    type="button"
                                     className="rounded-md bg-yellow-500 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-yellow-600 disabled:cursor-not-allowed disabled:bg-gray-400"
                                     onClick={() => window.open(ROBOT_CAMERA_URL, "_blank")}
                                     disabled={!ROBOT_CAMERA_URL}
