@@ -61,6 +61,14 @@ services:
       MQTT_TOPIC: imu/${IMU_106_DEVICE_ID}
       IMU_CSV_PATH: /app/data/imu-${IMU_106_DEVICE_ID}.csv
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_106_DEVICE_ID}.json
+      IMU_PLC_TRIGGER: "${IMU_PLC_TRIGGER:-false}"
+      IMU_PLC_PATH: "${IMU_PLC_PATH:-192.168.1.103}"
+      IMU_PLC_TAG_START: "${IMU_PLC_TAG_START:-Data_Start}"
+      IMU_PLC_TAG_TARE: "${IMU_PLC_TAG_TARE:-IMU_Tare}"
+      IMU_PLC_TAG_STOP: "${IMU_PLC_TAG_STOP:-Db_Stop}"
+      IMU_PLC_POLL_S: "${IMU_PLC_POLL_S:-0.05}"
+      IMU_PLC_MAX_RUN_S: "${IMU_PLC_MAX_RUN_S:-600}"
+      IMU_PLC_FAKE: "${IMU_PLC_FAKE:-false}"
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
       interval: 10s
@@ -104,6 +112,14 @@ services:
       MQTT_TOPIC: imu/${IMU_107_DEVICE_ID}
       IMU_CSV_PATH: /app/data/imu-${IMU_107_DEVICE_ID}.csv
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_107_DEVICE_ID}.json
+      IMU_PLC_TRIGGER: "${IMU_PLC_TRIGGER:-false}"
+      IMU_PLC_PATH: "${IMU_PLC_PATH:-192.168.1.103}"
+      IMU_PLC_TAG_START: "${IMU_PLC_TAG_START:-Data_Start}"
+      IMU_PLC_TAG_TARE: "${IMU_PLC_TAG_TARE:-IMU_Tare}"
+      IMU_PLC_TAG_STOP: "${IMU_PLC_TAG_STOP:-Db_Stop}"
+      IMU_PLC_POLL_S: "${IMU_PLC_POLL_S:-0.05}"
+      IMU_PLC_MAX_RUN_S: "${IMU_PLC_MAX_RUN_S:-600}"
+      IMU_PLC_FAKE: "${IMU_PLC_FAKE:-false}"
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
       interval: 10s
@@ -147,6 +163,14 @@ services:
       MQTT_TOPIC: imu/${IMU_108_DEVICE_ID}
       IMU_CSV_PATH: /app/data/imu-${IMU_108_DEVICE_ID}.csv
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_108_DEVICE_ID}.json
+      IMU_PLC_TRIGGER: "${IMU_PLC_TRIGGER:-false}"
+      IMU_PLC_PATH: "${IMU_PLC_PATH:-192.168.1.103}"
+      IMU_PLC_TAG_START: "${IMU_PLC_TAG_START:-Data_Start}"
+      IMU_PLC_TAG_TARE: "${IMU_PLC_TAG_TARE:-IMU_Tare}"
+      IMU_PLC_TAG_STOP: "${IMU_PLC_TAG_STOP:-Db_Stop}"
+      IMU_PLC_POLL_S: "${IMU_PLC_POLL_S:-0.05}"
+      IMU_PLC_MAX_RUN_S: "${IMU_PLC_MAX_RUN_S:-600}"
+      IMU_PLC_FAKE: "${IMU_PLC_FAKE:-false}"
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
       interval: 10s
@@ -190,6 +214,14 @@ services:
       MQTT_TOPIC: imu/${IMU_109_DEVICE_ID}
       IMU_CSV_PATH: /app/data/imu-${IMU_109_DEVICE_ID}.csv
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_109_DEVICE_ID}.json
+      IMU_PLC_TRIGGER: "${IMU_PLC_TRIGGER:-false}"
+      IMU_PLC_PATH: "${IMU_PLC_PATH:-192.168.1.103}"
+      IMU_PLC_TAG_START: "${IMU_PLC_TAG_START:-Data_Start}"
+      IMU_PLC_TAG_TARE: "${IMU_PLC_TAG_TARE:-IMU_Tare}"
+      IMU_PLC_TAG_STOP: "${IMU_PLC_TAG_STOP:-Db_Stop}"
+      IMU_PLC_POLL_S: "${IMU_PLC_POLL_S:-0.05}"
+      IMU_PLC_MAX_RUN_S: "${IMU_PLC_MAX_RUN_S:-600}"
+      IMU_PLC_FAKE: "${IMU_PLC_FAKE:-false}"
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
       interval: 10s
@@ -233,6 +265,14 @@ services:
       MQTT_TOPIC: imu/${IMU_110_DEVICE_ID}
       IMU_CSV_PATH: /app/data/imu-${IMU_110_DEVICE_ID}.csv
       IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_110_DEVICE_ID}.json
+      IMU_PLC_TRIGGER: "${IMU_PLC_TRIGGER:-false}"
+      IMU_PLC_PATH: "${IMU_PLC_PATH:-192.168.1.103}"
+      IMU_PLC_TAG_START: "${IMU_PLC_TAG_START:-Data_Start}"
+      IMU_PLC_TAG_TARE: "${IMU_PLC_TAG_TARE:-IMU_Tare}"
+      IMU_PLC_TAG_STOP: "${IMU_PLC_TAG_STOP:-Db_Stop}"
+      IMU_PLC_POLL_S: "${IMU_PLC_POLL_S:-0.05}"
+      IMU_PLC_MAX_RUN_S: "${IMU_PLC_MAX_RUN_S:-600}"
+      IMU_PLC_FAKE: "${IMU_PLC_FAKE:-false}"
     healthcheck:
       test: [CMD, python3, -m, imu_edge, healthcheck]
       interval: 10s
