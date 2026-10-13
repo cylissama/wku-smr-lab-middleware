@@ -108,6 +108,20 @@ def write_filtered_compose(cfg: dict[str, Any], services: list[str]) -> str:
 class DeployRequest(BaseModel):
     # Only deploy these services (others in the stack are pruned); omit for all
     services: list[str] | None = None
+    # Values for this deploy only, layered over the stack's env_file. Only the
+    # variables the stack lists under env_overrides in stacks.yml are accepted.
+    env: dict[str, str] | None = None
+
+
+# The request's env overrides, checked against the stack's env_overrides list
+def check_env_overrides(name: str, cfg: dict[str, Any], env: dict[str, str] | None) -> dict[str, str]:
+    env = env or {}
+    allowed = set(cfg.get("env_overrides") or [])
+    refused = sorted(set(env) - allowed)
+    if refused:
+        raise HTTPException(400, f"Stack '{name}' doesn't allow overriding {', '.join(refused)} "
+                                 f"(env_overrides in stacks.yml: {', '.join(sorted(allowed)) or 'none'})")
+    return env
 
 
 def get_lock(name: str) -> asyncio.Lock:
@@ -193,10 +207,13 @@ async def services(name: str) -> dict[str, Any]:
 
 # With a body listing services, deploys only those and prunes the rest of the
 # stack (so de-selected services stop); with no body, deploys the whole stack.
+# body.env sets allowed variables for this deploy (e.g. IMU_PLC_TRIGGER, which
+# fastapi-app turns off for monitoring and on for a recording session).
 @app.post("/stacks/{name}/deploy", dependencies=[Depends(verify_token)])
 async def deploy(name: str, body: DeployRequest | None = None) -> dict[str, Any]:
     cfg = get_stack_config(name)
-    stack_env = load_stack_env(name, cfg)
+    overrides = check_env_overrides(name, cfg, body.env if body else None)
+    stack_env = {**load_stack_env(name, cfg), **overrides}
     lock = get_lock(name)
     selected = body.services if body else None
 
@@ -231,7 +248,8 @@ async def deploy(name: str, body: DeployRequest | None = None) -> dict[str, Any]
     if result.returncode != 0:
         raise HTTPException(500, (result.stderr or result.stdout).strip())
 
-    return {"success": True, "stack": name, "services": selected, "output": result.stdout.strip()}
+    return {"success": True, "stack": name, "services": selected, "env": overrides or None,
+            "output": result.stdout.strip()}
 
 
 @app.post("/stacks/{name}/remove", dependencies=[Depends(verify_token)])

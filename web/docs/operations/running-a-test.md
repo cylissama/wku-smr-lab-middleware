@@ -121,11 +121,13 @@ Each device's status moves through **not deployed → starting → running → r
 
 ### Optional: check the devices with monitor mode first
 
-To see that devices are publishing without recording anything, click **Start Monitoring**. This brings the edge devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot panels (message rate plus latest values). Nothing is written to the database. From here you can either click **Start Session** — recording starts immediately, without redeploying the devices — or **Stop Monitoring** to take the devices back down.
+To see that devices are publishing without recording anything, click **Start Monitoring**. This brings the edge devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot panels (message rate plus latest values). Nothing is written to the database. While monitoring, the IMUs stream right away; they don't wait for the robot's PLC. From here you can either click **Start Session** or **Stop Monitoring** to take the devices back down. Starting a session from monitoring restarts the IMU services (only those; the cameras keep running) so they switch to waiting for the PLC. See step 7.
 
 ## 7. Start a session from the dashboard
 
 Once the dashboard is healthy, the robot operator is ready, and the IMU services are already running in Swarm, click **Start Session**. Because the IMU services are already running, they begin associating data with the session as soon as it starts.
+
+In a session, the IMUs run in **PLC trigger mode**: they only send data after the robot's PLC pulses `Data_Start`, tare on `IMU_Tare`, and stop sending on `Db_Stop`. Starting a session therefore (re)starts the IMU services, and the Messages box says so. An IMU only notices a `Data_Start` that comes *after* it is running, so wait until the IMUs show as running before starting the robot. Until the robot starts, the IMUs show as not receiving; that's expected.
 
 ## 8. Start the robot
 
@@ -140,6 +142,8 @@ docker stack rm imu
 ```
 
 Then click **Stop Session**. It stops accepting new data first, then waits (up to 10 s) for the IMU, camera, and robot buffers to finish writing before ending the session; a warning names any buffer that didn't drain in time.
+
+If PLC auto stop is on (the default in the lab), you don't have to click it: when the robot finishes, the PLC pulses `Db_Stop` and the session stops itself the same way. The dashboard switches to **Idle** within about 5 s. See [PLC auto stop](./plc-auto-stop).
 
 ## 10. Review data
 

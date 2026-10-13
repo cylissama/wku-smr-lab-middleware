@@ -14,3 +14,8 @@ stacks:
     env_file: /stacks/.env
     stack_name: edge
     deploy_flags: ["--resolve-image", "never"]
+    # Variables a deploy request may set for that deploy only (layered over
+    # env_file). fastapi-app sends IMU_PLC_TRIGGER=false when monitoring and
+    # true for a recording session, so monitoring streams right away while a
+    # session waits for the PLC's Data_Start. Any other override is refused.
+    env_overrides: [IMU_PLC_TRIGGER]

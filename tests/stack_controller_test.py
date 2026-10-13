@@ -52,12 +52,13 @@ class StackControllerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
         (root / "edge.yml").write_text(COMPOSE)
-        (root / ".env").write_text("IMU_106_DEVICE_ID=106\n")
+        (root / ".env").write_text("IMU_106_DEVICE_ID=106\nIMU_PLC_TRIGGER=false\n")
         (root / "stacks.yml").write_text(yaml.safe_dump({"stacks": {"edge": {
             "compose_file": str(root / "edge.yml"),
             "env_file": str(root / ".env"),
             "stack_name": "edge",
             "deploy_flags": ["--resolve-image", "never"],
+            "env_overrides": ["IMU_PLC_TRIGGER"],
         }}}))
 
         self.env = patch.dict(os.environ, {"STACK_CONTROLLER_TOKEN": "t"})
@@ -74,6 +75,7 @@ class StackControllerTests(unittest.TestCase):
                 "path": compose_file,
                 "compose": yaml.safe_load(Path(compose_file).read_text()),
                 "flags": flags,
+                "env": stack_env,
             })
             return subprocess.CompletedProcess([], 0, stdout="ok", stderr="")
 
@@ -130,6 +132,30 @@ class StackControllerTests(unittest.TestCase):
         resp = self.client.post("/stacks/edge/deploy", headers=self.headers, json={"services": []})
 
         self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.deployed, [])
+
+    def test_deploy_env_override_layered_over_env_file(self):
+        resp = self.client.post("/stacks/edge/deploy", headers=self.headers,
+                                json={"services": ["imu-106"], "env": {"IMU_PLC_TRIGGER": "true"}})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["env"], {"IMU_PLC_TRIGGER": "true"})
+        [call] = self.deployed
+        self.assertEqual(call["env"]["IMU_PLC_TRIGGER"], "true")
+        self.assertEqual(call["env"]["IMU_106_DEVICE_ID"], "106")    # rest of env_file kept
+
+    def test_deploy_without_override_uses_env_file(self):
+        self.client.post("/stacks/edge/deploy", headers=self.headers)
+
+        [call] = self.deployed
+        self.assertEqual(call["env"]["IMU_PLC_TRIGGER"], "false")
+
+    def test_deploy_refuses_unlisted_env_override(self):
+        resp = self.client.post("/stacks/edge/deploy", headers=self.headers,
+                                json={"env": {"MQTT_BROKER_IP": "10.0.0.1"}})
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("MQTT_BROKER_IP", resp.text)
         self.assertEqual(self.deployed, [])
 
     def test_temp_file_removed_when_deploy_fails(self):

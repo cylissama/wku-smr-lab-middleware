@@ -6,6 +6,7 @@ export const COMPONENT_LABELS = {
     tcp: "Robot TCP server",
     logs: "Log files",
     backups: "Backup folder",
+    plc: "PLC (robot done)",
 };
 
 export function describeAge(seconds) {

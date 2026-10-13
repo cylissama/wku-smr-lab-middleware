@@ -79,6 +79,7 @@ export default defineConfig({
         items: [
           { text: 'Running a test session', link: '/operations/running-a-test' },
           { text: 'Troubleshooting', link: '/operations/troubleshooting' },
+          { text: 'PLC auto stop', link: '/operations/plc-auto-stop' },
           { text: 'Camera live feed', link: '/operations/camera-ops' },
         ],
       },

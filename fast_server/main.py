@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from fast_server.parsing import parse_camera_message, parse_imu_message
 from fast_server.capture import CaptureMode, CaptureState, LiveSampler, device_key, split_current
 from fast_server.health import HealthRegistry, PathProbe, backoff_delay, describe_age
+from fast_server.plc_listener import PLCSignalWatcher, build_plc_factory
 
 
 def build_allowed_origins() -> list[str]:
@@ -91,8 +92,28 @@ app.state.db = None
 async def notify_misc(message: str, msg_type: str) -> None:
     await broadcast_message(misc_manager, message, msg_type)
 
+def env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+# Robot-done auto stop: the cell PLC pulses PLC_TAG_STOP when the robot
+# finishes, and plc_supervisor() stops the recording session -- see
+# fast_server/plc_listener.py. Off = button-only, no "plc" health entry.
+PLC_AUTO_STOP = env_flag("PLC_AUTO_STOP")
+PLC_PATH = os.getenv("PLC_PATH", "192.168.1.103")
+PLC_TAG_STOP = os.getenv("PLC_TAG_STOP", "Db_Stop")
+PLC_POLL_S = max(0.01, float(os.getenv("PLC_POLL_S", 0.05)))
+PLC_RETRY_S = float(os.getenv("PLC_RETRY_S", 1.0))
+PLC_FAKE = env_flag("PLC_FAKE")
+PLC_FAKE_SPEED = float(os.getenv("PLC_FAKE_SPEED", 1.0))
+
 # Dependency health, served by GET /health -- see fast_server/health.py
-health = HealthRegistry(["db", "mqtt", "stack_controller", "tcp", "logs", "backups"], notify=notify_misc)
+health = HealthRegistry(
+    ["db", "mqtt", "stack_controller", "tcp", "logs", "backups"] + (["plc"] if PLC_AUTO_STOP else []),
+    notify=notify_misc,
+)
 
 # How often the health monitor re-checks every dependency (s)
 HEALTH_INTERVAL = float(os.getenv("HEALTH_INTERVAL", 10))
@@ -175,8 +196,30 @@ insert_failures: dict[str, dict[str, float]] = {}
 # ended in the DB by apply_pending_session_end() once it's back
 pending_session_end: tuple[int, float] | None = None
 
+# Held for the whole of a session start or stop, so the Stop button, the PLC
+# and a start can't interleave (e.g. two stops ending a session and taking two
+# backups)
+session_lock = asyncio.Lock()
+
+# (session_id, time.monotonic(), reason) of the last successful stop. A Stop
+# click within ALREADY_STOPPED_WINDOW s of it, with nothing recording since, is
+# answered "already stopped" instead of failing on "no open session".
+last_stop: tuple[int | None, float, str | None] | None = None
+ALREADY_STOPPED_WINDOW = 30.0
+
+# Started by startup() when PLC_AUTO_STOP is on
+plc_watcher: PLCSignalWatcher | None = None
+
 # Swarm stacks brought up/down together with each session, via stack-controller
 MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "edge").split(",") if s.strip()]
+
+# Edge-stack settings per capture mode, sent with each deploy (stack-controller
+# only accepts the variables a stack lists under env_overrides in stacks.yml).
+# Monitoring streams right away; in a recording session the IMU nodes wait for
+# the PLC's Data_Start pulse before sending (IMU_PLC_TRIGGER on the edge node).
+# IMU_PLC_TRIGGER_ON_RECORD=false records without waiting, e.g. with no robot.
+MONITOR_STACK_ENV = {"IMU_PLC_TRIGGER": "false"}
+RECORD_STACK_ENV = {"IMU_PLC_TRIGGER": "true" if env_flag("IMU_PLC_TRIGGER_ON_RECORD", True) else "false"}
 
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not
 async def try_backup() -> dict[str, Any]:
@@ -450,15 +493,23 @@ async def stack_controller_request(method: str, path: str, body: dict[str, Any] 
         loggers.log_system_logger(f"Could not reach stack-controller for {method} {path}: {e}", True)
         return {"success": False, "error": str(e)}
 
-# Deploys/removes one Swarm stack; services limits a deploy to those services
-async def call_stack_controller(action: str, stack: str, services: list[str] | None = None) -> dict[str, Any]:
-    body = {"services": services} if services is not None else None
-    return await stack_controller_request("POST", f"/stacks/{stack}/{action}", body)
+# Deploys/removes one Swarm stack; services limits a deploy to those services,
+# env sets stack variables for this deploy (MONITOR_STACK_ENV/RECORD_STACK_ENV)
+async def call_stack_controller(action: str, stack: str, services: list[str] | None = None,
+                                env: dict[str, str] | None = None) -> dict[str, Any]:
+    body = {}
+    if services is not None:
+        body["services"] = services
+    if env:
+        body["env"] = env
+    return await stack_controller_request("POST", f"/stacks/{stack}/{action}", body or None)
 
 # Deploys every stack in MANAGED_STACKS, returns {stack_name: result}. With a
 # plan ({stack: [services]}, from resolve_selection), only those services run;
 # a stack with none selected is removed instead, so it doesn't keep publishing.
-async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None) -> dict[str, dict[str, Any]]:
+# env is passed through to every deploy (see MONITOR_STACK_ENV).
+async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None,
+                                env: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
 
     async def deploy_one(stack: str) -> dict[str, Any]:
         services = plan.get(stack) if plan is not None else None
@@ -467,7 +518,7 @@ async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None) -> dic
             if not result.get("success"):
                 loggers.log_system_logger(f"Could not remove unselected stack '{stack}': {result.get('error')}", True)
             return {"success": True, "skipped": True}
-        return await call_stack_controller("deploy", stack, services)
+        return await call_stack_controller("deploy", stack, services, env)
 
     results = await asyncio.gather(*(deploy_one(s) for s in MANAGED_STACKS))
     return dict(zip(MANAGED_STACKS, results))
@@ -611,7 +662,7 @@ async def start_listening(body: DeviceSelection | None = None) -> dict[str, Any]
     await set_capture(CaptureMode.MONITOR, devices=selected)
     await broadcast_message(misc_manager, "Monitoring started -- live data only, nothing is stored", "info")
 
-    deploy_results = await deploy_managed_stacks(plan)
+    deploy_results = await deploy_managed_stacks(plan, MONITOR_STACK_ENV)
     failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
     if failed_stacks:
@@ -702,6 +753,15 @@ async def start_session(
     is_test_session: bool = True,
     devices: Annotated[list[str] | None, Query()] = None,
 ) -> dict[str, Any]:
+    async with session_lock:
+        return await _start_session(label, session_label, is_test_session, devices)
+
+async def _start_session(
+    label: str,
+    session_label: str,
+    is_test_session: bool,
+    devices: list[str] | None,
+) -> dict[str, Any]:
 
     # A session is a DB row -- refuse (503) before touching stacks or the gate
     require_db()
@@ -714,7 +774,8 @@ async def start_session(
     opened_gate = False
 
     # Monitoring already has the edge stacks up, so recording just flips the gate
-    # (unless the selection changed)
+    # -- unless the selection changed, or the stacks need different settings
+    # (IMU_PLC_TRIGGER), which redeploys and restarts just the affected services
     was_monitoring = capture.mode == CaptureMode.MONITOR
     monitored_devices = capture.devices
 
@@ -742,10 +803,10 @@ async def start_session(
         await set_capture(CaptureMode.RECORD, session_id=session_id, devices=selected)
         opened_gate = True
 
-        if was_monitoring and selected == monitored_devices:
+        if was_monitoring and selected == monitored_devices and RECORD_STACK_ENV == MONITOR_STACK_ENV:
             deploy_results = {}
         else:
-            deploy_results = await deploy_managed_stacks(plan)
+            deploy_results = await deploy_managed_stacks(plan, RECORD_STACK_ENV)
         failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
         if failed_stacks:
@@ -755,7 +816,11 @@ async def start_session(
                 await broadcast_message(misc_manager, f"Failed to deploy '{name}' stack: {err}", "error")
 
             # Block: a session with no running stacks won't receive any data, so roll it back.
-            await set_capture(CaptureMode.IDLE)
+            # Coming from monitoring, its stacks are still up, so go back to that.
+            if was_monitoring:
+                await set_capture(CaptureMode.MONITOR, devices=monitored_devices)
+            else:
+                await set_capture(CaptureMode.IDLE)
             try:
                 await db.end_session()
             except Exception as rollback_err:
@@ -765,6 +830,14 @@ async def start_session(
                 "error": f"Failed to deploy stack(s): {', '.join(failed_stacks)}",
                 "success": False,
             }
+
+        # The IMU nodes only see a Data_Start that comes after they've
+        # (re)started, so the robot has to wait for them
+        if RECORD_STACK_ENV["IMU_PLC_TRIGGER"] == "true" and (
+            selected is None or any(key.startswith("imu/") for key in selected)
+        ):
+            await broadcast_message(misc_manager, "IMUs are (re)starting to wait for the robot's PLC Data_Start -- "
+                                                  "start the robot once they show as running", "info")
 
         return {
             "message": f"Session started with label: {label}",
@@ -795,10 +868,24 @@ async def start_session(
 # (apply_pending_session_end), with the time the stop was requested.
 @app.get("/session/stop")
 async def stop_session() -> dict[str, Any]:
-  global pending_session_end
+    async with session_lock:
+        # The dashboard learns about a stop it didn't make on its next poll, so a
+        # click can land just after the PLC already stopped the session
+        if capture.mode == CaptureMode.IDLE and last_stop and time.monotonic() - last_stop[1] < ALREADY_STOPPED_WINDOW:
+            session_id, _at, reason = last_stop
+            because = f" ({reason})" if reason else ""
+            return {"message": f"Session {session_id} was already stopped{because}", "success": True, "already_stopped": True}
+        return await _stop_session()
+
+# The stop itself, shared by the button (stop_session) and the PLC
+# (stop_session_from_plc). Callers hold session_lock. reason, if given, is
+# added to the "stopped" log line and dashboard message.
+async def _stop_session(reason: str | None = None) -> dict[str, Any]:
+  global pending_session_end, last_stop
 
   session_id = capture.session_id
   stopped_at = time.time()
+  because = f" ({reason})" if reason else ""
 
   try:
 
@@ -832,10 +919,11 @@ async def stop_session() -> dict[str, Any]:
         pending_session_end = (session_id, stopped_at)
         await set_capture(CaptureMode.IDLE)
 
-        msg = (f"Session {session_id} stopped, but the database is unreachable ({describe_exc(e)}). "
+        msg = (f"Session {session_id} stopped{because}, but the database is unreachable ({describe_exc(e)}). "
                f"Its end time will be saved when the database is back; rows still buffered were not stored.")
         loggers.log_event(msg, category="session", level=logging.WARNING, session_id=session_id)
         await broadcast_message(misc_manager, msg, "error")
+        last_stop = (session_id, time.monotonic(), reason)
 
         return {
             "message": msg,
@@ -847,14 +935,15 @@ async def stop_session() -> dict[str, Any]:
 
     await set_capture(CaptureMode.IDLE)
 
-    loggers.log_event(f"Session {session_id} stopped", category="session", session_id=session_id)
+    loggers.log_event(f"Session {session_id} stopped{because}", category="session", session_id=session_id)
     loggers.cur_camera_logger.info(f"Camera session ended.")
     loggers.cur_imu_logger.info(f"IMU session ended.")
     loggers.cur_robot_logger.info(f"Robot session ended.")
 
-    await broadcast_message(misc_manager, "Session ended with logs successfully")
+    await broadcast_message(misc_manager, f"Session ended with logs successfully{because}")
 
     msg = await try_backup()
+    last_stop = (session_id, time.monotonic(), reason)
 
     return {
         "message": f"Current Session Ended",
@@ -898,6 +987,51 @@ async def apply_pending_session_end() -> None:
     loggers.log_event(msg, category="session", session_id=session_id)
     await broadcast_message(misc_manager, msg, "info")
 
+# Starts the PLC watcher thread and the task that reacts to its pulses
+def start_plc_listener() -> None:
+    global plc_watcher
+
+    plc_watcher = PLCSignalWatcher(
+        build_plc_factory(PLC_PATH, fake=PLC_FAKE, fake_speed=PLC_FAKE_SPEED),
+        tags=(PLC_TAG_STOP,),
+        poll_s=PLC_POLL_S,
+        retry_delay_s=PLC_RETRY_S,
+    )
+    plc_watcher.start()
+    start_background(run_forever("plc_supervisor", plc_supervisor))
+    loggers.log_event(f"Watching PLC {PLC_PATH}{' (fake)' if PLC_FAKE else ''} tag {PLC_TAG_STOP}: "
+                      f"a pulse stops the recording session", category="system")
+
+# Checks the watcher's pulse count every 0.1 s. The watcher thread does the
+# counting, so a pulse can't slip by between two checks here.
+async def plc_supervisor() -> None:
+    seen = plc_watcher.count(PLC_TAG_STOP)
+    while True:
+        await asyncio.sleep(0.1)
+        count = plc_watcher.count(PLC_TAG_STOP)
+        if count != seen:
+            seen = count
+            await stop_session_from_plc()
+
+# The robot finished: stop the session exactly as the Stop button does. Only a
+# recording session is stopped -- monitoring and idle ignore the pulse, and so
+# does a start or stop already in progress (a pulse during a start belongs to
+# the robot's previous run, not the session being started).
+async def stop_session_from_plc() -> dict[str, Any] | None:
+    session_id = capture.session_id
+
+    if session_lock.locked() or capture.mode != CaptureMode.RECORD:
+        state = "a session start/stop is in progress" if session_lock.locked() else f"capture is {capture.mode.value}"
+        loggers.log_event(f"PLC {PLC_TAG_STOP} pulse ignored ({state})", category="session", important=False)
+        return None
+
+    # Free and checked above with no await in between, so this can't block
+    async with session_lock:
+        loggers.log_event(f"PLC {PLC_TAG_STOP} pulse (robot finished): stopping session {session_id}",
+                          category="session", session_id=session_id)
+        await broadcast_message(misc_manager, f"Robot finished (PLC {PLC_TAG_STOP}): stopping session {session_id}", "info")
+        return await _stop_session(reason=f"robot finished, PLC {PLC_TAG_STOP}")
+
 # Background tasks started at boot -- kept referenced so they aren't GC'd
 _background_tasks: set[asyncio.Task] = set()
 
@@ -940,6 +1074,8 @@ async def startup():
 
     start_background(db_supervisor())
     start_background(mqtt_supervisor())
+    if PLC_AUTO_STOP:
+        start_plc_listener()
     start_background(health_monitor())
 
 # Connects to the DB, retrying with backoff until it works, then resumes an
@@ -1072,7 +1208,26 @@ async def health_monitor() -> None:
             return
         await health.ok("backups", dir=str(BACKUP_DIR))
 
-    checks = (check_db, check_stack_controller, check_tcp, check_logs, check_backups)
+    async def check_plc() -> None:
+        if plc_watcher is None:
+            return
+        snap = plc_watcher.snapshot()
+        detail = dict(path=PLC_PATH, tag=PLC_TAG_STOP, value=snap["values"][PLC_TAG_STOP],
+                      pulses=snap["counts"][PLC_TAG_STOP], fake=PLC_FAKE)
+        age = snap["last_read_age_s"]
+        if not snap["connected"]:
+            if plc_watcher.last_error is None:
+                return  # first connect still in progress
+            await health.down("plc", f"can't reach PLC at {PLC_PATH}: {plc_watcher.last_error}",
+                              retry_in=PLC_RETRY_S, **detail)
+        elif age is not None and age > max(5.0, PLC_POLL_S * 50):
+            await health.down("plc", f"no answer from PLC at {PLC_PATH} for {age:g}s", **detail)
+        elif plc_watcher.tag_errors:
+            await health.down("plc", f"PLC tag problem: {plc_watcher.tag_errors}", **detail)
+        else:
+            await health.ok("plc", **detail)
+
+    checks = (check_db, check_stack_controller, check_tcp, check_logs, check_backups, check_plc)
     while True:
         results = await asyncio.gather(*(check() for check in checks), return_exceptions=True)
         for check, result in zip(checks, results):
@@ -1127,6 +1282,8 @@ async def restore_capture() -> None:
 @app.on_event("shutdown")
 async def shutdown_event():
     loggers.log_event("fastapi-app shutting down", category="system")
+    if plc_watcher is not None:
+        await asyncio.to_thread(plc_watcher.close)
     try:
         await mqtt.mqtt_shutdown()
     except Exception:

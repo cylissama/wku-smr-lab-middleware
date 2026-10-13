@@ -9,6 +9,10 @@ from fast_server.capture import CaptureMode, CaptureState, LiveSampler, split_cu
 IMU_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 0.1, 0.2, 0.3, 4, 5, 6, 7, 8, 9, 10, 20, 30"
 CAMERA_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 3, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6"
 
+# Stack settings sent with each deploy (fast_server.main MONITOR_STACK_ENV / RECORD_STACK_ENV)
+MONITOR_ENV = {"IMU_PLC_TRIGGER": "false"}
+RECORD_ENV = {"IMU_PLC_TRIGGER": "true"}
+
 
 def drain(queue: asyncio.Queue) -> list:
     items = []
@@ -319,7 +323,7 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_session_opens_gate_before_deploy(self):
         modes_at_deploy = []
 
-        async def deploy(plan=None):
+        async def deploy(plan=None, env=None):
             modes_at_deploy.append((m.capture.mode, m.capture.session_id))
             return {"edge": {"success": True}}
 
@@ -398,6 +402,8 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["mode"], "monitor")
         deploy.assert_awaited_once()
+        # Monitoring streams right away, without waiting for the PLC
+        self.assertEqual(deploy.await_args.args[1], {"IMU_PLC_TRIGGER": "false"})
         self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
 
     async def test_listen_start_deploy_failure_returns_to_idle(self):
@@ -439,15 +445,41 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
         remove.assert_not_awaited()
         self.assertEqual(m.capture.mode, CaptureMode.RECORD)
 
-    async def test_start_session_from_monitor_skips_redeploy(self):
+    async def test_start_session_from_monitor_redeploys_with_plc_trigger(self):
         m.capture.set(CaptureMode.MONITOR)
 
-        with patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock) as deploy:
+        with patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock,
+                   return_value={"edge": {"success": True}}) as deploy:
+            result = await m.start_session("lbl", session_label="Full System")
+
+        self.assertTrue(result["success"])
+        deploy.assert_awaited_once()
+        self.assertEqual(deploy.await_args.args[1], {"IMU_PLC_TRIGGER": "true"})
+        self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 11))
+
+    async def test_start_session_from_monitor_skips_redeploy_when_settings_match(self):
+        m.capture.set(CaptureMode.MONITOR)
+
+        with patch("fast_server.main.RECORD_STACK_ENV", {"IMU_PLC_TRIGGER": "false"}), \
+             patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock) as deploy:
             result = await m.start_session("lbl", session_label="Full System")
 
         self.assertTrue(result["success"])
         deploy.assert_not_awaited()
         self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 11))
+
+    async def test_failed_redeploy_from_monitor_goes_back_to_monitoring(self):
+        m.capture.set(CaptureMode.MONITOR, devices={"imu/106"})
+
+        with patch("fast_server.main.resolve_selection", new_callable=AsyncMock,
+                   return_value=({"imu/106"}, {"edge": ["imu-106"]})), \
+             patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock,
+                   return_value={"edge": {"success": False, "error": "busy"}}):
+            result = await m.start_session("lbl", session_label="Full System", devices=["imu/106"])
+
+        self.assertFalse(result["success"])
+        self.db.end_session.assert_awaited_once()
+        self.assertEqual((m.capture.mode, m.capture.devices), (CaptureMode.MONITOR, {"imu/106"}))
 
     async def test_failed_start_from_monitor_keeps_monitoring(self):
         m.capture.set(CaptureMode.MONITOR)
@@ -605,7 +637,7 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["devices"], ["imu/106"])
         self.assertEqual(m.capture.devices, {"imu/106"})
-        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["imu-106"]})])
+        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["imu-106"], "env": MONITOR_ENV})])
 
     async def test_listen_start_bad_selection_changes_nothing(self):
         result = await m.start_listening(m.DeviceSelection(devices=["imu/999"]))
@@ -620,7 +652,7 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         self.assertEqual(self.db.create_session.await_args.kwargs["devices"], {"camera/113", "robot/main"})
         self.assertEqual(m.capture.devices, {"camera/113", "robot/main"})
-        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["camera-front"]})])
+        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["camera-front"], "env": RECORD_ENV})])
 
     async def test_start_session_bad_selection_creates_no_session(self):
         result = await m.start_session("lbl", session_label="Full System", devices=["imu/999"])
@@ -629,12 +661,12 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.db.create_session.assert_not_awaited()
         self.assertEqual(m.capture.mode, CaptureMode.IDLE)
 
-    async def test_start_session_from_monitor_same_selection_skips_redeploy(self):
+    async def test_start_session_from_monitor_same_selection_redeploys_for_plc_trigger(self):
         m.capture.set(CaptureMode.MONITOR, devices={"imu/106"})
 
         await m.start_session("lbl", session_label="Full System", devices=["imu/106"])
 
-        self.assertEqual(self.posts(), [])
+        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["imu-106"], "env": RECORD_ENV})])
         self.assertEqual((m.capture.mode, m.capture.devices), (CaptureMode.RECORD, {"imu/106"}))
 
     async def test_start_session_from_monitor_changed_selection_redeploys(self):
@@ -642,7 +674,7 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
 
         await m.start_session("lbl", session_label="Full System", devices=["imu/106", "imu/107"])
 
-        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["imu-106", "imu-107"]})])
+        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["imu-106", "imu-107"], "env": RECORD_ENV})])
 
     async def test_failed_start_from_monitor_restores_monitored_selection(self):
         m.capture.set(CaptureMode.MONITOR, devices={"imu/106"})
