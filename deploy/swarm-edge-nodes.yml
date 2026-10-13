@@ -297,7 +297,9 @@ services:
       replicas: 1
       labels:
         smr.category: camera
-        smr.device: "${CAMERA_FRONT_DEVICE_ID}"
+        # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
+        # camera/113_front), and that's also its device label in the DB
+        smr.device: "${CAMERA_FRONT_DEVICE_ID}_${CAMERA_FRONT_NAME}"
 
       restart_policy:
         condition: any
@@ -338,7 +340,9 @@ services:
       replicas: 1
       labels:
         smr.category: camera
-        smr.device: "${CAMERA_SIDE_DEVICE_ID}"
+        # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
+        # camera/113_front), and that's also its device label in the DB
+        smr.device: "${CAMERA_SIDE_DEVICE_ID}_${CAMERA_SIDE_NAME}"
 
       restart_policy:
         condition: any

@@ -26,7 +26,7 @@ There are three separate questions, answered in three different places:
 
 ```text
  Browser (dashboard)
-   │  ticks devices: imu/106, camera/113, robot/main
+   │  ticks devices: imu/106, camera/113_front, robot/main
    │
    │  POST /listen/start {"devices": [...]}            ← monitor (nothing stored)
    │  GET  /session/start/{label}?...&devices=...      ← record
@@ -52,7 +52,7 @@ There are three separate questions, answered in three different places:
    ▼
  Raspberry Pis (Swarm workers)
      RPIIMUJ1 runs edge_imu-106  ──MQTT imu/106──►  mosquitto ──► fastapi-app
-     RPiCamFront runs edge_camera-front ──MQTT camera/113──► ...
+     RPiCamFront runs edge_camera-front ──MQTT camera/113_front──► ...
      (RPIIMUJ2..5, CameraPi2: nothing scheduled)
 ```
 
@@ -63,7 +63,7 @@ Every device is identified by a **device key** of the form `<category>/<device>`
 | Device | Key | Where the key comes from |
 |---|---|---|
 | IMU 106 | `imu/106` | its MQTT topic, `imu/${IMU_106_DEVICE_ID}` |
-| Front camera | `camera/113` | its MQTT topic, `camera/<device_id>` with `CAMERA_FRONT_DEVICE_ID=113` |
+| Front camera | `camera/113_front` | its MQTT topic, `camera/<device_id>_<name>` with `CAMERA_FRONT_DEVICE_ID=113`, `CAMERA_FRONT_NAME=front` (the `smr.device` label is `${CAMERA_FRONT_DEVICE_ID}_${CAMERA_FRONT_NAME}` to match) |
 | Robot arm | `robot/main` | fixed — the robot isn't a Swarm service (see [The robot is different](#the-robot-is-different)) |
 
 The key deliberately **matches the MQTT topic**, because that's the only thing the ingestion side ever sees: when `fastapi-app` receives a message on `imu/106`, `parse_imu_message()` takes `106` from the topic as `device_label`, and the gate checks `"imu/106"` against the selection. No lookup table is needed at message time.
@@ -123,7 +123,7 @@ Response:
   "stack": "edge",
   "services": [
     {"service": "imu-106", "category": "imu", "device_label": "106"},
-    {"service": "camera-front", "category": "camera", "device_label": "113"},
+    {"service": "camera-front", "category": "camera", "device_label": "113_front"},
     ...
   ],
   "success": true
@@ -155,7 +155,7 @@ The two calls carry the selection differently:
 POST /listen/start
 Content-Type: application/json
 
-{"devices": ["imu/106", "camera/113", "robot/main"]}
+{"devices": ["imu/106", "camera/113_front", "robot/main"]}
 ```
 
 ```http
@@ -170,7 +170,7 @@ GET /session/start/Full_System_2026-10-08T17%3A00%3A00.000Z?is_test_session=true
 
 | Return value | Example | Used for |
 |---|---|---|
-| capture filter | `{"imu/106", "camera/113", "robot/main"}` | the ingest gate — which messages are accepted |
+| capture filter | `{"imu/106", "camera/113_front", "robot/main"}` | the ingest gate — which messages are accepted |
 | deploy plan | `{"edge": ["camera-front", "imu-106"]}` | which Swarm services to run, per stack |
 
 It validates **before anything changes**: an empty list or an unknown key raises an error, and `start_session` resolves the selection *before* creating the session row, so a bad request leaves no half-started session behind. `None` (no selection) returns `(None, None)` — no catalog lookup at all.
