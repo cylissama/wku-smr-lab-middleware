@@ -12,6 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY fast_server ./fast_server
 COPY db ./db
+COPY common ./common
 
 EXPOSE 8000
 CMD ["uvicorn", "fast_server.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,4 +1,4 @@
-import asyncio, asyncpg, os, subprocess
+import asyncio, asyncpg, json, os, subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from fast_server import loggers
@@ -64,6 +64,8 @@ class DatabaseSingleton:
                 if cls._instance is None:
 
                     # Uses pools to only have a set number of connections that are available... Can be increase to allow more devices if needed
+                    # DB_CONNECT_TIMEOUT keeps an unreachable DB from stalling callers
+                    # for asyncpg's default 60 s -- callers retry on their own
                     pool = await asyncpg.create_pool(
                         host=os.getenv("DB_HOST"),
                         port=int(os.getenv("DB_PORT")),
@@ -72,6 +74,7 @@ class DatabaseSingleton:
                         password=os.getenv("DB_PASSWORD"),
                         min_size=min_size,
                         max_size=max_size,
+                        timeout=float(os.getenv("DB_CONNECT_TIMEOUT", 5)),
                     )
 
                     cls._instance = cls(pool)
@@ -241,7 +244,8 @@ class DatabaseSingleton:
             "-f", str(out),
         ]
 
-        env = {**os.environ, "PGPASSWORD": os.environ["PGPASSWORD"]}
+        # PGCONNECT_TIMEOUT: fail fast instead of hanging if the DB just went away
+        env = {**os.environ, "PGPASSWORD": os.environ["PGPASSWORD"], "PGCONNECT_TIMEOUT": os.getenv("PGCONNECT_TIMEOUT", "10")}
         await asyncio.to_thread(subprocess.run,cmd,check=True,env=env) # fix
 	# subprocess.run(cmd, check=True, env=env)
         return str(out)
@@ -747,7 +751,8 @@ class DatabaseSingleton:
         return label_id
 
     # Call to create a new session in DB & update current session
-    async def create_session(self, label, session_label_name, is_test_session=True):
+    # devices: selected device keys, or None for every device (stored as NULL)
+    async def create_session(self, label, session_label_name, is_test_session=True, devices=None):
 
         session_id = await self.get_latest_session()
 
@@ -761,15 +766,23 @@ class DatabaseSingleton:
 
             session_id = await conn.fetchval(
                 """
-                INSERT INTO session (label, started_at, is_test_session, session_label_id)
-                VALUES ($1, $2, $3, $4) RETURNING id
+                INSERT INTO session (label, started_at, is_test_session, session_label_id, devices)
+                VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id
                 """,
-                label, self.get_time(), is_test_session, session_label_id
+                label, self.get_time(), is_test_session, session_label_id,
+                json.dumps(sorted(devices)) if devices is not None else None
             )
 
         self.current_session_id = session_id
 
         return session_id
+
+    # Device keys selected for a session, or None if it used every device
+    async def get_session_devices(self, session_id) -> set[str] | None:
+        async with self.pool.acquire() as conn:
+            raw = await conn.fetchval("SELECT devices FROM session WHERE id = $1", session_id)
+
+        return set(json.loads(raw)) if raw is not None else None
 
     # Call to end the current active session
     async def end_session(self):
@@ -794,6 +807,26 @@ class DatabaseSingleton:
             )
         
         self.current_session_id = None
+
+    # Ends a specific session at a given time -- for a stop that was requested
+    # while the DB was unreachable and is applied once it's back. Leaves an
+    # already-ended session alone.
+    async def end_session_at(self, session_id: int, ended_at: float) -> None:
+
+        async with self.pool.acquire() as conn:
+
+            await conn.execute(
+                """
+                UPDATE "session"
+                SET ended_at = $1
+                WHERE id = $2 AND ended_at IS NULL
+                """,
+                ended_at,
+                session_id
+            )
+
+        if self.current_session_id == session_id:
+            self.current_session_id = None
 
     # Inserts a new device into the DB & Return the id
     async def insert_device(self, label, category, ip_address) -> int:

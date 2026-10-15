@@ -18,7 +18,22 @@ We plan to switch all orchestration to Docker Swarm in the future.
 | `ntp` | `cturra/ntp:latest` | Shared time source (see [Automations](/docker/automations)). |
 | `pgadmin` | `dpage/pgadmin4:9` | Multi-user pgAdmin for querying the database (see [Accessing the database](/data/accessing-database)). |
 
-Everything is driven by a single `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`).
+This stack is driven by the `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`). The edge nodes have their own, separate file; see below.
+
+### Two `.env` files
+
+There are two `.env` files on the AMS host. They configure different stacks, are read by different processes, and take effect at different times. Each starts with a banner saying which one it is.
+
+| | Broker stack `.env` | Edge stack `.env` |
+| --- | --- | --- |
+| Path | `.env` (repo root, next to `docker-compose.yml`) | `deploy/.env` (next to `swarm-edge-nodes.yml`) |
+| Template | `.env.example` | `deploy/.env.example` |
+| Configures | the always-on stack: `fastapi-app`, `tcp`, `web`, `stack-controller`, `pgadmin` | the IMU and camera services on the Pis |
+| Read by | `docker compose` (`env_file` / `${VAR}`) | `stack-controller` on every edge deploy (mounted at `/stacks/.env`), or your shell for a manual `docker stack deploy` |
+| Takes effect | after recreating the container (`docker compose up -d --force-recreate <service>`) | on the next deploy (Start Monitoring / Start Session); nothing to restart |
+| Examples | `DB_*`, ports, `BATCHES`, `PLC_AUTO_STOP`, `IMU_PLC_TRIGGER_ON_RECORD`, `STACK_CONTROLLER_TOKEN` | `IMU_10x_DEVICE_ID`, `IMU_SAMPLE_HZ`, `CAMERA_*`, `MQTT_BROKER_IP`, `IMU_PLC_TRIGGER` |
+
+The PLC trigger is the easy one to mix up. Whether a session waits for the PLC is set by `IMU_PLC_TRIGGER_ON_RECORD` in the **root** `.env`. fastapi-app uses it to choose the `IMU_PLC_TRIGGER` value it sends with each edge deploy, and that value replaces the `IMU_PLC_TRIGGER` line in `deploy/.env`. So editing `IMU_PLC_TRIGGER` in `deploy/.env` changes nothing for monitoring or sessions; it only applies to a manual `docker stack deploy`. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
 ### `mqtt-broker`
 
@@ -36,15 +51,16 @@ Built locally from the repo (not a NAS/registry service). Connects out to Postgr
 
 Built with a large set of build **args**, because Vite bakes environment values into the static bundle at build time rather than reading them at runtime: `HOST_IP`, `FASTAPI_PORT`, `VITE_API_URL`, `VITE_WS_URL`, `VITE_AI_URL`, `VITE_TWINS_URL`, `VITE_ROBOT_CAMERA_URL`, `VITE_DB_GUI_URL`. This means **the frontend must be rebuilt** any time one of these values changes — see the "SOP: Mockup to Production Cutover" document in the dashboard's Info library for the full list of environment-driven service links.
 
-nginx inside this container (`web/nginx.conf`) does three things:
+nginx inside this container (`web/nginx.conf`) does four things:
 
-- proxies `/api/` to `fastapi-app:8000`
+- proxies `/api/` to `fastapi-app:8000`, looking the name up **per request** (Docker's DNS at `127.0.0.11`), so `web` starts and keeps serving even while `fastapi-app` is down; API calls then get a JSON 503 saying so
+- proxies the two read-only routes `/api/system/containers` and `/api/system/logs` to `stack-controller:8080` for the dashboard's Container Health and Logs boxes (GET only; stack-controller's deploy routes are not exposed)
 - serves `/docs/` (this site) with SPA fallback to `docs/index.html`
 - serves everything else as the dashboard SPA, with `/info/manifest.json` explicitly marked no-cache so the document library always reflects the latest build
 
 ### `tcp`
 
-Same `.env`-driven configuration pattern as `fastapi-app`, listening on `ROBOT_TCP_PORT` (default `5001`).
+Same `.env`-driven configuration pattern as `fastapi-app`, listening on `ROBOT_TCP_PORT` (default `5001`). Its log files go to `LOG_DIR=/tcp-server/logs`, which is where the `logs` NFS volume is mounted.
 
 ### `pgadmin`
 
@@ -57,6 +73,16 @@ The lab's pgAdmin, moved off the NAS into this stack. Published on `PGADMIN_PORT
 ### `ntp`
 
 Runs with `SYS_NICE`/`SYS_TIME` capabilities and mounts the host's `/etc/localtime` read-only. See [Automations](/docker/automations) for why this exists.
+
+## Health, restarts and logs
+
+Every container is set up to come back by itself and to say why it isn't working. The details are in [Health & logs](/docker/health-and-logs). In short:
+
+- **Nothing waits on the database, NAS or broker to start.** `fastapi-app` and `tcp` connect in the background and keep retrying; `web` has no `depends_on` and doesn't need `fastapi-app` to be up.
+- **`restart: unless-stopped`** on every service, so a crashed container is restarted.
+- **Docker health checks** on `mqtt-broker`, `fastapi-app`, `tcp`, `web` (plus the existing ones on `stack-controller`, `pgadmin`, `ntp`), all sharing the `x-healthcheck-timing` settings. "Healthy" means the container itself works, not that its dependencies are up.
+- **Labels**: `smr.monitor: "true"` shows a container in the dashboard's Container Health and Logs boxes; `smr.autoheal: "true"` lets stack-controller's watchdog restart it when it goes `unhealthy` (plain Compose never does). `stack-controller` itself is monitored but not auto-restarted.
+- **Log rotation**: `x-logging` caps Docker's own logs at 5 × 10 MB per container.
 
 ## Volumes
 

@@ -10,3 +10,4 @@ psutil==7.1.2
 Jinja2==3.1.6
 facade-sdk==0.4.3
 aiohttp
+pycomm3==1.2.16

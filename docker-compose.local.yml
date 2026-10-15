@@ -33,11 +33,38 @@
 # (`docker node update --label-add camera=front $(docker node ls -q)`) for
 # a manual smoke test.
 
+# Docker's own log files for every AMS service: rotated, so verbose stdout
+# logging can't fill the disk; kept across restarts (not recreates)
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# Docker health checks: "healthy" means the container itself works, not that
+# its dependencies are up (see fast_server/healthcheck.py). stack-controller's
+# watchdog restarts smr.autoheal containers that go unhealthy; smr.monitor ones
+# show in the dashboard's Container Health and Logs boxes.
+x-healthcheck-timing: &healthcheck-timing
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+  start_interval: 2s
+
 services:
 
   mqtt-broker:
     image: eclipse-mosquitto:2
     container_name: AMS-mqtt-broker-local
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/broker/uptime", "-C", "1", "-W", "3"]
+      <<: *healthcheck-timing
+    labels:
+      smr.monitor: "true"
+      smr.autoheal: "true"
     ports:
       - "${MQTT_PORT}:1883"
       - "9001:9001"
@@ -60,6 +87,10 @@ services:
   pgadmin:
     image: dpage/pgadmin4:9
     container_name: AMS-pgadmin-local
+    logging: *default-logging
+    labels:
+      smr.monitor: "true"
+      smr.autoheal: "true"
     environment:
       - PGADMIN_DEFAULT_EMAIL=${PGADMIN_EMAIL:-admin@example.com}
       - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_PASSWORD:-admin}
@@ -75,9 +106,18 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: AMS-fastapi-local
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-m", "fast_server.healthcheck"]
+      <<: *healthcheck-timing
+    labels:
+      smr.monitor: "true"
+      smr.autoheal: "true"
     env_file:
       - .env
     environment:
+      - SERVICE_NAME=fastapi-app
       - MQTT_HOST=mqtt-broker
       - NTP_SERVER=ntp
       # Overrides whatever DB_HOST/DB_PORT is set to in .env — always talk to
@@ -116,10 +156,15 @@ services:
       context: .
       dockerfile: stack_controller/Dockerfile
     container_name: AMS-stack-controller-local
+    restart: unless-stopped
+    logging: *default-logging
+    labels:
+      smr.monitor: "true"
     env_file:
       - .env
     environment:
       - STACK_CONTROLLER_TOKEN=${STACK_CONTROLLER_TOKEN}
+      - SERVICE_NAME=stack-controller
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./deploy:/stacks:ro
@@ -148,16 +193,30 @@ services:
         DB_GUI_URL: ${DB_GUI_URL:-}
         PORTAINER_URL: ${PORTAINER_URL:-}
     container_name: AMS-dashboard-docs-local
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      <<: *healthcheck-timing
+    labels:
+      smr.monitor: "true"
+      smr.autoheal: "true"
     ports:
       - "${WEB_PORT}:80"
-    depends_on:
-      - fastapi-app
 
   tcp:
     build:
       context: .
       dockerfile: tcp_server/dockerfile
     container_name: AMS-tcp-listener-local
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-m", "fast_server.healthcheck", "http://127.0.0.1:8090/queue/status"]
+      <<: *healthcheck-timing
+    labels:
+      smr.monitor: "true"
+      smr.autoheal: "true"
     env_file:
       - .env
     environment:
@@ -175,6 +234,9 @@ services:
       - ROBOT_TCP_PORT=5001
       - HOST_IP=${HOST_IP}
       - ROBOT_STATUS_PORT=8090
+      - SERVICE_NAME=tcp
+      # loggers write to LOG_DIR -- must match the logs volume mount below
+      - LOG_DIR=/tcp-server/logs
     ports:
       - "${ROBOT_TCP_PORT}:5001"
     # No published port for ROBOT_STATUS_PORT -- only fastapi-app on the same
@@ -187,6 +249,10 @@ services:
   ntp:
     image: cturra/ntp:latest
     container_name: AMS-ntp-local
+    logging: *default-logging
+    labels:
+      smr.monitor: "true"
+      smr.autoheal: "true"
     restart: unless-stopped
     ports:
       - "${NTP_PORT}:123/udp"

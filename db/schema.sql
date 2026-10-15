@@ -52,7 +52,9 @@ CREATE TABLE session (
     started_at DOUBLE PRECISION NOT NULL,
     ended_at DOUBLE PRECISION,
     is_test_session BOOLEAN NOT NULL DEFAULT TRUE,
-    session_label_id INTEGER NOT NULL REFERENCES session_label (id)
+    session_label_id INTEGER NOT NULL REFERENCES session_label (id),
+    -- Selected device keys (e.g. ["imu/106", "robot/main"]); NULL = all devices
+    devices JSONB
 );
 
 CREATE TABLE session_device (

@@ -104,3 +104,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS image_detection_session_id_frame_idx_idx
     ON public.image_detection (session_id, frame_idx);
 ANALYZE public.imu_measurement;
 ANALYZE public.image_detection;
+
+# Oct 8 2026
+-- Device selection per session (listener-switch phase C). NULL = every device
+-- (all sessions before this, and any session started without a selection);
+-- otherwise a JSON array of device keys, e.g. ["imu/106", "robot/main"].
+-- Must be applied BEFORE deploying the matching fastapi-app, whose
+-- create_session() writes this column.
+ALTER TABLE IF EXISTS public.session
+    ADD COLUMN IF NOT EXISTS devices JSONB;

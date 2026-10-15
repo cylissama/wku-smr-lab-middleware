@@ -1,5 +1,9 @@
 # Swarm
 
+::: warning Partly out of date
+The edge devices now run as one stack, `edge` (`deploy/swarm-edge-nodes.yml`: IMUs 106–110 and both cameras), which the dashboard brings up and down through the `stack-controller` agent — including starting only the devices you select. For how that works today, see [Stack controller & device selection](/docker/stack-controller). The sections below on the older `imu`/`smr` stacks and manual scaling are kept for history.
+:::
+
 [Docker Swarm Mode](https://docs.docker.com/engine/swarm/) is being used in the development of this project to improve the efficiency of the session tests. Swarm works with the existing containers to deploy conatiners over network.
 
 `deploy/swarm-imu-edge-nodes.yml` currently only deploys the **IMU edge nodes** — separately from the `docker-compose.yml` broker stack described in [Compose](/docker/compose). Where Compose runs on one host, this stack runs one service per IMU, each pinned to a specific Raspberry Pi across a Docker Swarm cluster.

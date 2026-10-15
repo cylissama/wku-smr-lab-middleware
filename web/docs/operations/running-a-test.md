@@ -17,7 +17,7 @@ Current as of Apr 20, 2026. This replaces the older per-device `docker compose -
 
 ## 1. Initialize the middleware
 
-The middleware runs on the MiniPC at `192.168.1.76` and is normally already up — check the [Dashboard](http://192.168.1.76/data/dashboard) first. If it's reachable and showing healthy listeners, skip to step 2. Otherwise, SSH into the middleware host (credentials via the lab's password manager, not written here) and start it:
+The middleware runs on the MiniPC at `192.168.1.76` and is normally already up — check the [Dashboard](http://192.168.2.100/) first. If it's reachable and showing healthy listeners, skip to step 2. Otherwise, SSH into the middleware host (credentials via the lab's password manager, not written here) and start it:
 
 ```bash
 ssh data-team@192.168.1.76
@@ -106,11 +106,28 @@ Healthy signs: a running task on the correct node, no socket connection failures
 
 ## 6. Ensure the dashboard shows listening status
 
-Green listening indicators mean the middleware is waiting for incoming data. Red messages about no active session yet (e.g. `CAMERA batch insert failed: No current active session. Run a GET to start a new session.`) are expected before a session starts and are not a blocker.
+Green listening indicators mean the dashboard's WebSocket feeds are connected. With no session running, the middleware ignores any device data that arrives — nothing is queued or stored, and nothing from before the session is carried into it. Data is only captured between **Start Session** and **Stop Session**. The badge next to the session indicator shows the current capture mode: **Idle**, **Monitoring — not saved**, **Recording**, or **Stopping**.
+
+### Choose which devices to run
+
+The **Devices** panel lists every IMU, camera, and the robot with its current state. Everything is ticked by default. Untick devices to test only part of the system — a whole category with its group box, or single devices. Only the ticked devices are started, shown in the live feeds, and recorded; the session remembers which devices it used. The selection is locked while monitoring or recording.
+
+Each device's status moves through **not deployed → starting → running → receiving**:
+
+- **starting / running** come from Docker Swarm. A device shows *starting* until its container's first health check passes (about 10 s for IMUs, longer for cameras while they warm up).
+- **receiving · N msg/s** means its data is actually reaching the AMS right now (a message within the last 3 s). This is the one to trust.
+- **running · no data** (amber) while monitoring or recording means the device is up but nothing is arriving — e.g. a camera with no marker in view, or a wrong MQTT topic.
+- The robot shows **connected** when it has a TCP connection open, and **receiving** once lines arrive.
+
+### Optional: check the devices with monitor mode first
+
+To see that devices are publishing without recording anything, click **Start Monitoring**. This brings the edge devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot panels (message rate plus latest values). Nothing is written to the database. While monitoring, the IMUs stream right away; they don't wait for the robot's PLC. From here you can either click **Start Session** or **Stop Monitoring** to take the devices back down. Starting a session from monitoring restarts the IMU services (only those; the cameras keep running) so they switch to waiting for the PLC. See step 7.
 
 ## 7. Start a session from the dashboard
 
 Once the dashboard is healthy, the robot operator is ready, and the IMU services are already running in Swarm, click **Start Session**. Because the IMU services are already running, they begin associating data with the session as soon as it starts.
+
+In a session, the IMUs run in **PLC trigger mode**: they only send data after the robot's PLC pulses `Data_Start`, tare on `IMU_Tare`, and stop sending on `Db_Stop`. Starting a session therefore (re)starts the IMU services, and the Messages box says so. An IMU only notices a `Data_Start` that comes *after* it is running, so wait until the IMUs show as running before starting the robot. Until the robot starts, the IMUs show as not receiving; that's expected.
 
 ## 8. Start the robot
 
@@ -124,12 +141,14 @@ When the robot run is complete, remove the IMU stack:
 docker stack rm imu
 ```
 
-Give the system roughly 15–20 seconds to flush any remaining messages, then click **Stop Session**.
+Then click **Stop Session**. It stops accepting new data first, then waits (up to 10 s) for the IMU, camera, and robot buffers to finish writing before ending the session; a warning names any buffer that didn't drain in time.
+
+If PLC auto stop is on (the default in the lab), you don't have to click it: when the robot finishes, the PLC pulses `Db_Stop` and the session stops itself the same way. The dashboard switches to **Idle** within about 5 s. See [PLC auto stop](./plc-auto-stop).
 
 ## 10. Review data
 
 - [Database Browser](http://192.168.2.100:5050/browser/)
-- [Dashboard](http://192.168.1.76/data/dashboard)
+- [Dashboard](http://192.168.2.100/)
 
 ## Quick reference
 

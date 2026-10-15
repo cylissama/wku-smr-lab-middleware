@@ -1,6 +1,6 @@
 ## Camera nodes
 
-Raspberry Pis fitted with cameras run the camera sensor-fusion pipeline (ArUco/marker pose detection) and publish frame + marker pose data to MQTT under `camera/<device_id>`. A separate image-analysis machine consumes and processes the camera stream.
+Raspberry Pis fitted with cameras run the camera sensor-fusion pipeline (ArUco/marker pose detection) and publish frame + marker pose data to MQTT under `camera/<device_id>_<name>` (e.g. `camera/113_front`), only for frames where a marker is detected. No marker in view means no messages. A separate image-analysis machine consumes and processes the camera stream.
 
 
 # Marker Pose Data Format: Data from the Camera Nodes

@@ -12,12 +12,14 @@ export async function getSessionLabels() {
     return apiGet("/session/labels");
 }
 
-export async function startSessionByLabel(label, isTestSession = true, sessionLabel) {
+// devices: device keys to record (e.g. ["imu/106", "robot/main"]), or null for all
+export async function startSessionByLabel(label, isTestSession = true, sessionLabel, devices = null) {
     const encodedLabel = encodeURIComponent(label);
     const encodedIsTestSession = encodeURIComponent(String(Boolean(isTestSession)));
     const encodedSessionLabel = encodeURIComponent(sessionLabel);
+    const deviceParams = (devices ?? []).map((key) => `&devices=${encodeURIComponent(key)}`).join("");
     return apiGet(
-        `/session/start/${encodedLabel}?is_test_session=${encodedIsTestSession}&session_label=${encodedSessionLabel}`
+        `/session/start/${encodedLabel}?is_test_session=${encodedIsTestSession}&session_label=${encodedSessionLabel}${deviceParams}`
     );
 }
 

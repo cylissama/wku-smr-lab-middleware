@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY fast_server ./fast_server
 COPY db ./db
+COPY common ./common
 COPY tcp_server/tcp_server.py .
 
 CMD ["python", "tcp_server.py"]
