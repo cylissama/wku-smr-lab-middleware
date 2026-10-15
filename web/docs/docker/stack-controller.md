@@ -12,7 +12,7 @@ If you only need to *use* the feature, the operator steps are in [Running a test
 | Selection logic, capture state, `/devices` | `fast_server/main.py`, `fast_server/capture.py` |
 | Swarm control agent | `stack_controller/main.py`, `stack_controller/docker_ops.py`, `stack_controller/auth.py` |
 | Which stacks the agent may touch | `stack_controller/stacks.yml` |
-| The edge stack itself | `deploy/swarm-edge-nodes.yml` + `deploy/.env` |
+| The edge stack itself | `deploy/swarm-edge-nodes.yml` + `deploy/.env` (the edge stack's own `.env`, not the repo-root one; see [Two `.env` files](/docker/compose#two-env-files)) |
 | Robot gate | `tcp_server/tcp_server.py` |
 :::
 

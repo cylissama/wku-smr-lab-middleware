@@ -18,7 +18,22 @@ We plan to switch all orchestration to Docker Swarm in the future.
 | `ntp` | `cturra/ntp:latest` | Shared time source (see [Automations](/docker/automations)). |
 | `pgadmin` | `dpage/pgadmin4:9` | Multi-user pgAdmin for querying the database (see [Accessing the database](/data/accessing-database)). |
 
-Everything is driven by a single `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`).
+This stack is driven by the `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`). The edge nodes have their own, separate file; see below.
+
+### Two `.env` files
+
+There are two `.env` files on the AMS host. They configure different stacks, are read by different processes, and take effect at different times. Each starts with a banner saying which one it is.
+
+| | Broker stack `.env` | Edge stack `.env` |
+| --- | --- | --- |
+| Path | `.env` (repo root, next to `docker-compose.yml`) | `deploy/.env` (next to `swarm-edge-nodes.yml`) |
+| Template | `.env.example` | `deploy/.env.example` |
+| Configures | the always-on stack: `fastapi-app`, `tcp`, `web`, `stack-controller`, `pgadmin` | the IMU and camera services on the Pis |
+| Read by | `docker compose` (`env_file` / `${VAR}`) | `stack-controller` on every edge deploy (mounted at `/stacks/.env`), or your shell for a manual `docker stack deploy` |
+| Takes effect | after recreating the container (`docker compose up -d --force-recreate <service>`) | on the next deploy (Start Monitoring / Start Session); nothing to restart |
+| Examples | `DB_*`, ports, `BATCHES`, `PLC_AUTO_STOP`, `IMU_PLC_TRIGGER_ON_RECORD`, `STACK_CONTROLLER_TOKEN` | `IMU_10x_DEVICE_ID`, `IMU_SAMPLE_HZ`, `CAMERA_*`, `MQTT_BROKER_IP`, `IMU_PLC_TRIGGER` |
+
+The PLC trigger is the easy one to mix up. Whether a session waits for the PLC is set by `IMU_PLC_TRIGGER_ON_RECORD` in the **root** `.env`. fastapi-app uses it to choose the `IMU_PLC_TRIGGER` value it sends with each edge deploy, and that value replaces the `IMU_PLC_TRIGGER` line in `deploy/.env`. So editing `IMU_PLC_TRIGGER` in `deploy/.env` changes nothing for monitoring or sessions; it only applies to a manual `docker stack deploy`. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
 ### `mqtt-broker`
 

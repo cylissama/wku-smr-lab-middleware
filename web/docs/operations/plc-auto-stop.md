@@ -33,9 +33,9 @@ The IMU edge nodes read the same PLC. With `IMU_PLC_TRIGGER=true`, an IMU waits 
 
 Going from monitoring to a session redeploys the edge stack. Only the IMU services restart, because nothing else changed; the cameras keep running. Start the robot only after the IMUs are back up: an IMU ignores a `Data_Start` that arrived before it started.
 
-To record without the robot (IMUs streaming as soon as the session starts), set `IMU_PLC_TRIGGER_ON_RECORD=false` in the main `.env` and recreate `fastapi-app`. Then starting a session from monitoring with the same devices doesn't redeploy anything.
+To record without the robot (IMUs streaming as soon as the session starts), set `IMU_PLC_TRIGGER_ON_RECORD=false` in the repo-root `.env` (the broker stack's, not `deploy/.env`) and recreate `fastapi-app`. Then starting a session from monitoring with the same devices doesn't redeploy anything.
 
-How it gets there: stack-controller only lets a deploy request set the variables listed under `env_overrides` for the stack in `stack_controller/stacks.yml` (`IMU_PLC_TRIGGER` for `edge`). They are layered over `deploy/.env` for that deploy only, and anything else is refused with a 400. The `IMU_PLC_TRIGGER` line in `deploy/.env` only applies to a manual `docker stack deploy`.
+How it gets there: stack-controller only lets a deploy request set the variables listed under `env_overrides` for the stack in `stack_controller/stacks.yml` (`IMU_PLC_TRIGGER` for `edge`). They are layered over `deploy/.env` for that deploy only, and anything else is refused with a 400. The `IMU_PLC_TRIGGER` line in `deploy/.env` only applies to a manual `docker stack deploy`. See [Two `.env` files](/docker/compose#two-env-files).
 
 ## Checking it
 
@@ -57,7 +57,7 @@ While the PLC is unreachable, a pulse is missed. The session keeps recording unt
 
 ## Turning it on or off
 
-It's controlled by the `.env` next to `docker-compose.yml`, then a recreate of `fastapi-app`:
+It's controlled by the repo-root `.env` next to `docker-compose.yml` (not `deploy/.env`), then a recreate of `fastapi-app`:
 
 ```bash
 PLC_AUTO_STOP=true         # false = button only, no PLC health entry

@@ -80,7 +80,9 @@ npm run docs:build
 ```bash
 docker compose up -d
 ```
-Requires a `.env` file next to `docker-compose.yml` (not committed, see `.env.example`) providing `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `MQTT_PORT`, `FASTAPI_PORT`, `WEB_PORT`, `ROBOT_TCP_PORT`, `NTP_PORT`, `HOST_IP`, `QUEUE_SIZE`, `BATCHES`, `B_TIMEOUT`, and the `VITE_*`/`*_URL` build args consumed by `web/dockerfile`.
+There are **two `.env` files**, both gitignored, each with a banner saying which it is: the broker stack's `.env` next to `docker-compose.yml` (read by compose; changes need a container recreate) and the edge stack's `deploy/.env` (read by stack-controller on each edge deploy; template `deploy/.env.example`). `IMU_PLC_TRIGGER_ON_RECORD` lives in the root one; the `IMU_PLC_TRIGGER` in `deploy/.env` is overridden on every dashboard deploy. See `web/docs/docker/compose.md#two-env-files`.
+
+The broker stack's `.env` (see `.env.example`) provides `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `MQTT_PORT`, `FASTAPI_PORT`, `WEB_PORT`, `ROBOT_TCP_PORT`, `NTP_PORT`, `HOST_IP`, `QUEUE_SIZE`, `BATCHES`, `B_TIMEOUT`, and the `VITE_*`/`*_URL` build args consumed by `web/dockerfile`.
 
 By default `DB_HOST` points at the lab NAS's Postgres instance, and the `nas_backups`/`logs` volumes are NFS mounts to that same NAS — this only works from inside the lab network. To replicate the stack elsewhere: `docker compose --profile local-db up -d` adds a bundled `postgres` alongside the lab stack (still requires NFS access for backups/logs unless unused); `docker compose -f docker-compose.local.yml up -d` is a fully self-contained, NAS-free copy of the whole stack (bundled Postgres/pgAdmin, local volumes) for testing on any machine. See `web/docs/docker/compose.md`.
 
