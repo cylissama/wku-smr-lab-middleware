@@ -1,19 +1,5 @@
 import { useEffect, useRef } from "react";
-
-const CATEGORY_ORDER = ["imu", "camera", "robot"];
-const CATEGORY_NAMES = { imu: "IMU", camera: "Camera", robot: "Robot" };
-
-// Device state (from GET /devices) -> dot color and text
-const STATE_STYLES = {
-    running: { dot: "bg-green-500", text: "running" },
-    connected: { dot: "bg-green-500", text: "connected" },
-    deploying: { dot: "bg-amber-400", text: "starting" },
-    removing: { dot: "bg-amber-400", text: "stopping" },
-    error: { dot: "bg-red-500", text: "error" },
-    not_deployed: { dot: "bg-gray-300", text: "not deployed" },
-    not_connected: { dot: "bg-gray-300", text: "not connected" },
-    unknown: { dot: "bg-gray-300", text: "unknown" },
-};
+import { CATEGORY_NAMES, TONE_DOTS, deviceName, deviceVisualState, groupDevices } from "../lib/deviceState";
 
 // Checkbox that can also show "some selected"
 function TriStateCheckbox({ checked, indeterminate, disabled, onChange, label }) {
@@ -36,49 +22,6 @@ function TriStateCheckbox({ checked, indeterminate, disabled, onChange, label })
             aria-label={label}
         />
     );
-}
-
-// Receiving (data actually arriving) wins over the Swarm/connection state.
-// While listening, a device that's up but silent is flagged as "no data".
-function deviceStatus(device, listening) {
-    const base = STATE_STYLES[device.state] ?? STATE_STYLES.unknown;
-    const isUp = device.state === "running" || device.state === "connected";
-    const lastSeen = device.last_seen_s == null ? "never" : `${device.last_seen_s}s ago`;
-    const title = `${base.text} · last message ${lastSeen}`;
-
-    if (device.receiving) {
-        return {
-            dot: "bg-cyan-500 animate-pulse",
-            text: device.rate ? `receiving · ${Math.round(device.rate)} msg/s` : "receiving",
-            title,
-        };
-    }
-    if (listening && isUp) {
-        return { dot: "bg-amber-400", text: `${base.text} · no data`, title };
-    }
-    return { ...base, title };
-}
-
-function deviceName(device) {
-    return device.service ?? device.category;
-}
-
-function groupDevices(devices) {
-    const groups = new Map();
-
-    for (const device of devices) {
-        if (!groups.has(device.category)) {
-            groups.set(device.category, []);
-        }
-        groups.get(device.category).push(device);
-    }
-
-    const rank = (category) => {
-        const i = CATEGORY_ORDER.indexOf(category);
-        return i === -1 ? CATEGORY_ORDER.length : i;
-    };
-
-    return [...groups.entries()].sort(([a], [b]) => rank(a) - rank(b));
 }
 
 // Picks which devices to monitor/record: all, a category, or single devices.
@@ -157,7 +100,7 @@ export default function DeviceSelector({ devices, selected, onChange, locked, li
 
                             <ul className="flex flex-col gap-1.5">
                                 {group.map((device) => {
-                                    const style = deviceStatus(device, listening && selected.has(device.key));
+                                    const style = deviceVisualState(device, listening && selected.has(device.key));
 
                                     return (
                                         <li key={device.key}>
@@ -177,7 +120,7 @@ export default function DeviceSelector({ devices, selected, onChange, locked, li
                                                     className="inline-flex items-center gap-1.5 text-xs text-gray-600"
                                                     title={style.title}
                                                 >
-                                                    <span className={`inline-block h-2 w-2 rounded-full ${style.dot}`}></span>
+                                                    <span className={`inline-block h-2 w-2 rounded-full ${TONE_DOTS[style.tone]}`}></span>
                                                     {style.text}
                                                 </span>
                                             </label>

@@ -116,8 +116,19 @@ Each device's status moves through **not deployed → starting → running → r
 
 - **starting / running** come from Docker Swarm. A device shows *starting* until its container's first health check passes (about 10 s for IMUs, longer for cameras while they warm up).
 - **receiving · N msg/s** means its data is actually reaching the AMS right now (a message within the last 3 s). This is the one to trust.
-- **running · no data** (amber) while monitoring or recording means the device is up but nothing is arriving — e.g. a camera with no marker in view, or a wrong MQTT topic.
+- **running · no data** (red) while monitoring or recording means the device is up but nothing is arriving — e.g. a camera with no marker in view, or a wrong MQTT topic.
 - The robot shows **connected** when it has a TCP connection open, and **receiving** once lines arrive.
+
+The status dots, and the **Field Devices** graphics in the left margin on wide screens (about 1840 px and up), share one color code:
+
+| Color | Meaning |
+|---|---|
+| Grey | Offline: not deployed, or the robot isn't connected. Normal while idle. |
+| Blue | Standby: starting, running or connected, but not sending (or not being listened to). |
+| Green | Sending: data is arriving now. The graphic shows the message rate (`TX · N/s`). |
+| Red | Fault: a Swarm error, no status from stack-controller, or up but no data while monitoring/recording. |
+
+Devices left out of the current selection are dimmed in the graphics.
 
 ### Optional: check the devices with monitor mode first
 

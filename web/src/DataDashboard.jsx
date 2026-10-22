@@ -4,6 +4,7 @@ import StatusIndicator from "./components/StatusIndicator";
 import BackupCard from "./components/BackupCard";
 import DashboardPanel from "./components/DashboardPanel";
 import DeviceSelector from "./components/DeviceSelector";
+import DeviceRail from "./components/DeviceRail";
 import ContainerHealth from "./components/ContainerHealth";
 import LogsPanel from "./components/LogsPanel";
 import { HealthDetails, HealthStrip } from "./components/SystemHealth";
@@ -404,7 +405,20 @@ export default function DataDashboard() {
         (isMonitoring || (captureMode === "idle" && !activeSession && hasDeviceSelection));
 
     return (
-        <div className="min-h-screen bg-gray-100 text-gray-900">
+        // Wide screens get a 3-column grid: the device rail fills the left
+        // gutter and the main column stays centered at its usual width
+        <div className="min-h-screen bg-gray-100 text-gray-900 min-[1840px]:grid min-[1840px]:grid-cols-[1fr_minmax(0,80rem)_1fr]">
+            <div className="hidden justify-self-end pt-20 min-[1840px]:block">
+                <div className="sticky top-14 max-h-[calc(100vh-4.5rem)] w-64 overflow-y-auto">
+                    <DeviceRail
+                        devices={devices}
+                        selected={shownSelection}
+                        listening={captureMode === "monitor" || captureMode === "record"}
+                        captureMode={captureMode}
+                    />
+                </div>
+            </div>
+
             <div className="mx-auto w-full max-w-7xl px-4 pb-8 pt-20 sm:px-6 lg:px-8">
                 <div className="sticky top-14 z-30 mb-6 rounded-xl border border-gray-200 bg-white/95 shadow-sm backdrop-blur">
                     <div className="flex flex-col gap-4 p-4 lg:p-5">
