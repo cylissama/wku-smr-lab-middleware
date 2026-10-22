@@ -35,6 +35,8 @@ There are two `.env` files on the AMS host. They configure different stacks, are
 
 The PLC trigger is the easy one to mix up. Whether a session waits for the PLC is set by `IMU_PLC_TRIGGER_ON_RECORD` in the **root** `.env`. fastapi-app uses it to choose the `IMU_PLC_TRIGGER` value it sends with each edge deploy, and that value replaces the `IMU_PLC_TRIGGER` line in `deploy/.env`. So editing `IMU_PLC_TRIGGER` in `deploy/.env` changes nothing for monitoring or sessions; it only applies to a manual `docker stack deploy`. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
+Some edge values (`IMU_SAMPLE_HZ`, `IMU_PLC_MAX_RUN_S`, and `IMU_PLC_TRIGGER_ON_RECORD` from the root file) are only **defaults** now: the dashboard's [Run Parameters](/operations/run-parameters) panel can override them per run, and those overrides win over the `.env` line.
+
 ### `mqtt-broker`
 
 The mqtt-broker is hosted on the local port of the data broker machine, so the IP will stay the same. That IP is currently 192.168.2.100.

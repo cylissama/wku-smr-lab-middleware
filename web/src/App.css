@@ -64,8 +64,9 @@ body {
   animation: wiggle 0.5s ease-in-out;
 }
 
-/* Device rail tiles (components/DeviceRail.jsx): each tile sets --tone to
-   its status color; data-tone picks the animation */
+/* Device rail and run parameters tiles (components/DeviceRail.jsx,
+   ParamRail.jsx): each tile sets --tone to its status color; data-tone picks
+   the animation */
 .dev-tile {
   --tone: #64748b;
   position: relative;

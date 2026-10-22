@@ -80,6 +80,7 @@ export default defineConfig({
           { text: 'Running a test session', link: '/operations/running-a-test' },
           { text: 'Troubleshooting', link: '/operations/troubleshooting' },
           { text: 'PLC auto stop', link: '/operations/plc-auto-stop' },
+          { text: 'Run parameters', link: '/operations/run-parameters' },
           { text: 'Camera live feed', link: '/operations/camera-ops' },
         ],
       },

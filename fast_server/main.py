@@ -18,6 +18,7 @@ from fast_server.parsing import parse_camera_message, parse_imu_message
 from fast_server.capture import CaptureMode, CaptureState, LiveSampler, device_key, split_current
 from fast_server.health import HealthRegistry, PathProbe, backoff_delay, describe_age
 from fast_server.plc_listener import PLCSignalWatcher, build_plc_factory
+from fast_server import run_params
 
 
 def build_allowed_origins() -> list[str]:
@@ -196,9 +197,9 @@ insert_failures: dict[str, dict[str, float]] = {}
 # ended in the DB by apply_pending_session_end() once it's back
 pending_session_end: tuple[int, float] | None = None
 
-# Held for the whole of a session start or stop, so the Stop button, the PLC
-# and a start can't interleave (e.g. two stops ending a session and taking two
-# backups)
+# Held for the whole of a session start or stop (and monitor start/stop and run
+# parameter changes), so the Stop button, the PLC and a start can't interleave
+# (e.g. two stops ending a session and taking two backups)
 session_lock = asyncio.Lock()
 
 # (session_id, time.monotonic(), reason) of the last successful stop. A Stop
@@ -213,13 +214,25 @@ plc_watcher: PLCSignalWatcher | None = None
 # Swarm stacks brought up/down together with each session, via stack-controller
 MANAGED_STACKS = [s.strip() for s in os.getenv("MANAGED_STACKS", "edge").split(",") if s.strip()]
 
-# Edge-stack settings per capture mode, sent with each deploy (stack-controller
-# only accepts the variables a stack lists under env_overrides in stacks.yml).
-# Monitoring streams right away; in a recording session the IMU nodes wait for
-# the PLC's Data_Start pulse before sending (IMU_PLC_TRIGGER on the edge node).
-# IMU_PLC_TRIGGER_ON_RECORD=false records without waiting, e.g. with no robot.
-MONITOR_STACK_ENV = {"IMU_PLC_TRIGGER": "false"}
-RECORD_STACK_ENV = {"IMU_PLC_TRIGGER": "true" if env_flag("IMU_PLC_TRIGGER_ON_RECORD", True) else "false"}
+# Run parameters set from the dashboard (fast_server/run_params.py): only the
+# ones changed from their default, saved to RUN_PARAMS_PATH, loaded at startup
+RUN_PARAMS_PATH = Path(os.getenv("RUN_PARAMS_PATH", "/state/run_parameters.json"))
+run_overrides: dict[str, Any] = {}
+
+# The env the managed stacks were last deployed with (None if unknown or removed)
+deployed_env: dict[str, str] | None = None
+
+# Edge-stack settings for a deploy in this capture mode (stack-controller only
+# accepts the variables a stack lists under env_overrides in stacks.yml): the
+# edge run parameters, plus IMU_PLC_TRIGGER. Monitoring streams right away; in
+# a recording session the IMU nodes wait for the PLC's Data_Start pulse before
+# sending, unless IMU_PLC_TRIGGER_ON_RECORD is off (e.g. with no robot).
+def stack_env(mode: CaptureMode) -> dict[str, str]:
+    env = {k: run_params.env_value(v) for k, v in run_overrides.items() if k in run_params.EDGE_PARAMS}
+    wait = mode == CaptureMode.RECORD and run_overrides.get(
+        "IMU_PLC_TRIGGER_ON_RECORD", env_flag("IMU_PLC_TRIGGER_ON_RECORD", True))
+    env["IMU_PLC_TRIGGER"] = "true" if wait else "false"
+    return env
 
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not
 async def try_backup() -> dict[str, Any]:
@@ -494,7 +507,7 @@ async def stack_controller_request(method: str, path: str, body: dict[str, Any] 
         return {"success": False, "error": str(e)}
 
 # Deploys/removes one Swarm stack; services limits a deploy to those services,
-# env sets stack variables for this deploy (MONITOR_STACK_ENV/RECORD_STACK_ENV)
+# env sets stack variables for this deploy (see stack_env())
 async def call_stack_controller(action: str, stack: str, services: list[str] | None = None,
                                 env: dict[str, str] | None = None) -> dict[str, Any]:
     body = {}
@@ -507,9 +520,10 @@ async def call_stack_controller(action: str, stack: str, services: list[str] | N
 # Deploys every stack in MANAGED_STACKS, returns {stack_name: result}. With a
 # plan ({stack: [services]}, from resolve_selection), only those services run;
 # a stack with none selected is removed instead, so it doesn't keep publishing.
-# env is passed through to every deploy (see MONITOR_STACK_ENV).
+# env is passed through to every deploy (see stack_env()).
 async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None,
                                 env: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
+    global deployed_env
 
     async def deploy_one(stack: str) -> dict[str, Any]:
         services = plan.get(stack) if plan is not None else None
@@ -521,6 +535,7 @@ async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None,
         return await call_stack_controller("deploy", stack, services, env)
 
     results = await asyncio.gather(*(deploy_one(s) for s in MANAGED_STACKS))
+    deployed_env = env if all(r.get("success") for r in results) else None
     return dict(zip(MANAGED_STACKS, results))
 
 # The robot isn't a Swarm service -- it streams to tcp_server on its own
@@ -613,6 +628,8 @@ async def get_devices() -> dict[str, Any]:
 
 # Removes every stack in MANAGED_STACKS, returns {stack_name: result}
 async def remove_managed_stacks() -> dict[str, dict[str, Any]]:
+    global deployed_env
+    deployed_env = None
     results = await asyncio.gather(*(call_stack_controller("remove", s) for s in MANAGED_STACKS))
     return dict(zip(MANAGED_STACKS, results))
 
@@ -647,10 +664,112 @@ async def set_capture(mode: CaptureMode, session_id: int | None = None, devices:
 async def get_capture() -> dict[str, Any]:
     return capture.to_dict()
 
+# Each run parameter's default: deploy/.env's value for the edge ones (via
+# stack-controller; None if it can't be read), this process's env for the other
+async def run_param_defaults() -> dict[str, Any]:
+    listings = await asyncio.gather(*(stack_controller_request("GET", f"/stacks/{s}/env") for s in MANAGED_STACKS))
+    env = {k: v for listing in listings for k, v in (listing.get("env") or {}).items()}
+
+    defaults: dict[str, Any] = {"IMU_PLC_TRIGGER_ON_RECORD": env_flag("IMU_PLC_TRIGGER_ON_RECORD", True)}
+    for key in run_params.EDGE_PARAMS:
+        try:
+            defaults[key] = run_params.parse(key, env[key])
+        except (KeyError, ValueError):
+            defaults[key] = None
+    return defaults
+
+# Every run parameter's value for the next deploy, as stored in session.parameters
+async def effective_run_params() -> dict[str, Any]:
+    return {**await run_param_defaults(), **run_overrides}
+
+# Run parameters can't change while a session is recording or stopping
+EDITABLE_PARAM_MODES = (CaptureMode.IDLE, CaptureMode.MONITOR)
+
+# API for the dashboard's run parameters panel: each parameter's definition,
+# default and current value, and whether they can be changed right now
+@app.get("/parameters")
+async def get_parameters() -> dict[str, Any]:
+    defaults = await run_param_defaults()
+    params = [
+        {"key": key, **p, "default": defaults[key], "value": run_overrides.get(key, defaults[key]),
+         "overridden": key in run_overrides}
+        for key, p in run_params.PARAMS.items()
+    ]
+    return {"data": params, "editable": capture.mode in EDITABLE_PARAM_MODES, "mode": capture.mode.value,
+            "success": True}
+
+class RunParamsUpdate(BaseModel):
+    # New values by key; null resets that parameter to its default
+    values: dict[str, Any]
+
+# API to change run parameters. They apply to the next deploy; while monitoring
+# the edge stacks are redeployed right away (restarting the services whose
+# settings changed), so the effect shows live.
+@app.put("/parameters")
+async def put_parameters(body: RunParamsUpdate) -> dict[str, Any]:
+    global run_overrides
+
+    async with session_lock:
+        if capture.mode not in EDITABLE_PARAM_MODES:
+            return {"error": f"Run parameters are locked while {capture.mode.value}", "success": False}
+
+        new, errors = dict(run_overrides), {}
+        for key, value in body.values.items():
+            if key not in run_params.PARAMS:
+                errors[key] = f"Unknown run parameter {key}"
+            elif value is None:
+                new.pop(key, None)
+            else:
+                try:
+                    new[key] = run_params.parse(key, value)
+                except ValueError as e:
+                    errors[key] = str(e)
+
+        if errors:
+            return {"error": "; ".join(errors.values()), "errors": errors, "success": False}
+
+        try:
+            await asyncio.to_thread(run_params.save, RUN_PARAMS_PATH, new)
+        except OSError as e:
+            loggers.log_event(f"Could not save run parameters to {RUN_PARAMS_PATH}: {e}",
+                              category="parameters", level=logging.ERROR)
+            return {"error": f"Could not save run parameters: {e}", "success": False}
+
+        changes = [f"{k} {run_overrides.get(k, 'default')} -> {new.get(k, 'default')}"
+                   for k in sorted(run_overrides.keys() | new.keys()) if run_overrides.get(k) != new.get(k)]
+        run_overrides = new
+        if changes:
+            loggers.log_event(f"Run parameters changed: {', '.join(changes)}", category="parameters")
+            await broadcast_message(misc_manager, f"Run parameters changed: {', '.join(changes)}", "info")
+
+        monitor_env = stack_env(CaptureMode.MONITOR)
+        if capture.mode != CaptureMode.MONITOR or deployed_env == monitor_env:
+            return {"success": True, "redeployed": False}
+
+        try:
+            _, plan = await resolve_selection(sorted(capture.devices) if capture.devices is not None else None)
+            results = await deploy_managed_stacks(plan, monitor_env)
+            failed = {name: r.get("error") for name, r in results.items() if not r.get("success")}
+        except Exception as e:
+            failed = {"edge": str(e)}
+
+        if failed:
+            message = f"Run parameters saved, but redeploying for monitoring failed: {failed}"
+            loggers.log_event(message, category="parameters", level=logging.ERROR)
+            await broadcast_message(misc_manager, message, "error")
+            return {"error": message, "success": False}
+
+        await broadcast_message(misc_manager, "Edge stacks redeployed with the new run parameters", "info")
+        return {"success": True, "redeployed": True}
+
 # API to start monitor (listen-only) mode: brings the edge stacks up and shows
 # live samples on the dashboard, but nothing is stored
 @app.post("/listen/start")
 async def start_listening(body: DeviceSelection | None = None) -> dict[str, Any]:
+    async with session_lock:
+        return await _start_listening(body)
+
+async def _start_listening(body: DeviceSelection | None) -> dict[str, Any]:
     if capture.mode != CaptureMode.IDLE:
         return {"error": f"Can't start monitoring while {capture.mode.value}", "success": False}
 
@@ -662,7 +781,7 @@ async def start_listening(body: DeviceSelection | None = None) -> dict[str, Any]
     await set_capture(CaptureMode.MONITOR, devices=selected)
     await broadcast_message(misc_manager, "Monitoring started -- live data only, nothing is stored", "info")
 
-    deploy_results = await deploy_managed_stacks(plan, MONITOR_STACK_ENV)
+    deploy_results = await deploy_managed_stacks(plan, stack_env(CaptureMode.MONITOR))
     failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
     if failed_stacks:
@@ -679,6 +798,10 @@ async def start_listening(body: DeviceSelection | None = None) -> dict[str, Any]
 # API to stop monitor mode and take the edge stacks back down
 @app.post("/listen/stop")
 async def stop_listening() -> dict[str, Any]:
+    async with session_lock:
+        return await _stop_listening()
+
+async def _stop_listening() -> dict[str, Any]:
     if capture.mode != CaptureMode.MONITOR:
         return {"error": f"Not monitoring (currently {capture.mode.value})", "success": False}
 
@@ -784,13 +907,20 @@ async def _start_session(
         # Validated before the session row exists, so a bad selection creates nothing
         selected, plan = await resolve_selection(devices)
 
+        # Read once under session_lock: what's deployed is what's recorded
+        record_env = stack_env(CaptureMode.RECORD)
+        parameters = await effective_run_params()
+
         db = app.state.db
         session_id = await db.create_session(
             label=label, session_label_name=session_label, is_test_session=is_test_session, devices=selected,
+            parameters=parameters,
         )
 
+        changed = ", ".join(f"{k}={v}" for k, v in sorted(run_overrides.items()))
         loggers.log_event(f"Session {session_id} started: {label} (type: {session_label}, "
-                          f"devices: {', '.join(sorted(selected)) if selected else 'all'})",
+                          f"devices: {', '.join(sorted(selected)) if selected else 'all'}, "
+                          f"parameters: {changed or 'defaults'})",
                           category="session", session_id=session_id)
         loggers.cur_camera_logger.info(f"Camera session ready with label: {label}")
         loggers.cur_imu_logger.info(f"IMU session ready with label: {label}")
@@ -803,10 +933,10 @@ async def _start_session(
         await set_capture(CaptureMode.RECORD, session_id=session_id, devices=selected)
         opened_gate = True
 
-        if was_monitoring and selected == monitored_devices and RECORD_STACK_ENV == MONITOR_STACK_ENV:
+        if was_monitoring and selected == monitored_devices and deployed_env == record_env:
             deploy_results = {}
         else:
-            deploy_results = await deploy_managed_stacks(plan, RECORD_STACK_ENV)
+            deploy_results = await deploy_managed_stacks(plan, record_env)
         failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
 
         if failed_stacks:
@@ -833,7 +963,7 @@ async def _start_session(
 
         # The IMU nodes only see a Data_Start that comes after they've
         # (re)started, so the robot has to wait for them
-        if RECORD_STACK_ENV["IMU_PLC_TRIGGER"] == "true" and (
+        if record_env["IMU_PLC_TRIGGER"] == "true" and (
             selected is None or any(key.startswith("imu/") for key in selected)
         ):
             await broadcast_message(misc_manager, "IMUs are (re)starting to wait for the robot's PLC Data_Start -- "
@@ -1067,6 +1197,11 @@ async def startup():
     # Creates the loggers instances to be ready
     loggers.create_loggers()
     loggers.log_event("fastapi-app starting", category="system")
+
+    global run_overrides
+    run_overrides, problems = run_params.load(RUN_PARAMS_PATH)
+    for problem in problems:
+        loggers.log_event(problem, category="parameters", level=logging.WARNING)
 
     # Idle until the DB says otherwise. Always set() so the version is fresh --
     # tcp_server may still hold a RECORD state from before a restart.

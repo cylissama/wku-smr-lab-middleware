@@ -83,6 +83,8 @@ services:
     volumes:
       - nas_backups:/db_backups
       - logs:/fast_server/logs
+      # Run parameters set from the dashboard; local, not NFS, so a save can't hang
+      - fastapi_state:/state
     depends_on:
       - mqtt-broker
       - stack-controller
@@ -265,6 +267,7 @@ services:
 
 volumes:
   chrony-state:
+  fastapi_state:
   postgres_data:
   pgadmin_data:
   nas_backups:

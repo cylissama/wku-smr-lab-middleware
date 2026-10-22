@@ -1,4 +1,5 @@
 import asyncio
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,7 +10,7 @@ from fast_server.capture import CaptureMode, CaptureState, LiveSampler, split_cu
 IMU_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 0.1, 0.2, 0.3, 4, 5, 6, 7, 8, 9, 10, 20, 30"
 CAMERA_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 3, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6"
 
-# Stack settings sent with each deploy (fast_server.main MONITOR_STACK_ENV / RECORD_STACK_ENV)
+# Stack settings sent with each deploy with no run parameters set (fast_server.main.stack_env)
 MONITOR_ENV = {"IMU_PLC_TRIGGER": "false"}
 RECORD_ENV = {"IMU_PLC_TRIGGER": "true"}
 
@@ -309,11 +310,15 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
         for p in self.patches:
             p.start()
 
+        self.patches.append(patch("fast_server.main.run_param_defaults", new_callable=AsyncMock, return_value={}))
+        self.patches[-1].start()
+
         self.db = MagicMock()
         self.db.create_session = AsyncMock(return_value=11)
         self.db.end_session = AsyncMock()
         m.app.state.db = self.db
         m.capture.set(CaptureMode.IDLE)
+        m.deployed_env, m.run_overrides = None, {}
 
     async def asyncTearDown(self):
         for p in self.patches:
@@ -460,7 +465,9 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_session_from_monitor_skips_redeploy_when_settings_match(self):
         m.capture.set(CaptureMode.MONITOR)
 
-        with patch("fast_server.main.RECORD_STACK_ENV", {"IMU_PLC_TRIGGER": "false"}), \
+        m.deployed_env = MONITOR_ENV
+
+        with patch.dict(os.environ, {"IMU_PLC_TRIGGER_ON_RECORD": "false"}), \
              patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock) as deploy:
             result = await m.start_session("lbl", session_label="Full System")
 
@@ -560,6 +567,7 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.db.end_session = AsyncMock()
         m.app.state.db = self.db
         m.capture.set(CaptureMode.IDLE)
+        m.deployed_env, m.run_overrides = None, {}
 
     async def asyncTearDown(self):
         for p in self.patches:

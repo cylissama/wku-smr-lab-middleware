@@ -146,6 +146,8 @@ services:
     volumes:
       - db_backups_local:/db_backups
       - app_logs_local:/fast_server/logs
+      # Run parameters set from the dashboard; local, not NFS, so a save can't hang
+      - fastapi_state:/state
     depends_on:
       - mqtt-broker
       - postgres
@@ -267,6 +269,7 @@ services:
 
 volumes:
   postgres_data_local:
+  fastapi_state:
   pgadmin_data_local:
   db_backups_local:
   app_logs_local:
