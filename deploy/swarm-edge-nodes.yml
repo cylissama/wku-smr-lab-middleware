@@ -280,6 +280,57 @@ services:
       retries: 3
       start_period: 15s
 
+  imu-111:
+    image: smart-mfg-imu:latest
+    user: "0:0"
+    command: [python3, -m, imu_edge]
+    deploy:
+      replicas: 1
+      labels:
+        smr.category: imu
+        smr.device: "${IMU_111_DEVICE_ID}"
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+         - node.hostname == ${IMU_111_HOSTNAME}
+    volumes:
+      - type: bind
+        source: /run/imu-hw
+        target: /run/imu-hw
+      - type: bind
+        source: /opt/smart-mfg-imu/data
+        target: /app/data
+    environment:
+      DEVICE_ID: "${IMU_111_DEVICE_ID}"
+      IMU_SOCKET_PATH: /run/imu-hw/imu.sock
+      IMU_SESSION_ID: imu-node-${IMU_111_DEVICE_ID}
+      IMU_SAMPLE_HZ: "${IMU_SAMPLE_HZ}"
+      IMU_REQUEST_TARE: "${IMU_REQUEST_TARE}"
+      IMU_RESET_COUNTER: "${IMU_RESET_COUNTER}"
+      IMU_AUTO_START_SESSION: "${IMU_AUTO_START_SESSION}"
+      IMU_STOP_SESSION_ON_EXIT: "${IMU_STOP_SESSION_ON_EXIT}"
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      MQTT_BROKER_PORT: "${MQTT_BROKER_PORT}"
+      MQTT_CLIENT_ID: "${IMU_111_DEVICE_ID}"
+      MQTT_TOPIC: imu/${IMU_111_DEVICE_ID}
+      IMU_CSV_PATH: /app/data/imu-${IMU_111_DEVICE_ID}.csv
+      IMU_EDGE_HEALTH_PATH: /tmp/imu-edge-health-${IMU_111_DEVICE_ID}.json
+      IMU_PLC_TRIGGER: "${IMU_PLC_TRIGGER:-false}"
+      IMU_PLC_PATH: "${IMU_PLC_PATH:-192.168.1.103}"
+      IMU_PLC_TAG_START: "${IMU_PLC_TAG_START:-Data_Start}"
+      IMU_PLC_TAG_TARE: "${IMU_PLC_TAG_TARE:-IMU_Tare}"
+      IMU_PLC_TAG_STOP: "${IMU_PLC_TAG_STOP:-Db_Stop}"
+      IMU_PLC_POLL_S: "${IMU_PLC_POLL_S:-0.05}"
+      IMU_PLC_MAX_RUN_S: "${IMU_PLC_MAX_RUN_S:-600}"
+      IMU_PLC_FAKE: "${IMU_PLC_FAKE:-false}"
+    healthcheck:
+      test: [CMD, python3, -m, imu_edge, healthcheck]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # --- Camera edge nodes (pinned by node.labels.camera) ---
 
   camera-front:
