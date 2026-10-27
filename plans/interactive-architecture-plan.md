@@ -1,6 +1,6 @@
 # Interactive architecture diagram: plan
 
-Request: `plans/interactive-architecture.md`. Status: **phase 1 in progress** (2026-10-27).
+Request: `plans/interactive-architecture.md`. Status: **phase 1 built** (2026-10-27, branch `dev/architecture-diagram`); web image built, not yet deployed. Phase 2 next.
 
 **Decided:** LikeC4; hosted at `/architecture/`; an invalid model does **not** fail the web image build (it logs an error and the page shows it); phase 5 skipped for now; downstream consumers are placeholders. Still open: `smr.description` labels (phase 2).
 
@@ -66,7 +66,7 @@ tests/architecture_test.py        # inventory is current; every service is descr
 | Source | Becomes |
 | --- | --- |
 | `docker-compose.yml` services | `ams.<service>` elements: title, image/build, published ports, `smr.monitor`/`smr.autoheal`, compose profile |
-| `deploy/swarm-edge-nodes.yml` services | `edge.<service>` elements: `smr.category`/`smr.device`, placement, image |
+| `deploy/swarm-edge-nodes.yml` services + `deploy/.env.example` hostnames | **Deployment** instances, one per Pi (`host rpiimuj1 { instanceOf edge.imuNode }`), replacing the hand-written `views/deployment.c4` hosts. The logical model has one element per *kind* of node (`edge.imuNode`, `edge.cameraNode`); see the phase 1 notes |
 | `stack_controller/stacks.yml` | `env_overrides` as metadata on the edge stack |
 | `smr.description` label on each service (**new**) | The element's description |
 
@@ -107,13 +107,22 @@ There are two different meanings. Both are covered, and they're kept separate:
 
 | Phase | Delivers | Done when |
 | --- | --- | --- |
-| **1. Model + site** | `spec.c4`, hand-written landscape/AMS/edge model, static views, build into the web image at `/architecture/` | Site loads on prod; every element has a description and code link; `likec4 validate` clean |
+| **1. Model + site** ✅ | `spec.c4`, hand-written landscape/AMS/edge model, static views, build into the web image at `/architecture/` | Site loads on prod; every element has a description and code link; `likec4 validate` clean |
 | **2. Generated inventory + drift test** | `smr.description` labels in `docker-compose.yml`, `docker-compose.local.yml`, `swarm-edge-nodes.yml`; `architecture/sync.py`; `generated/inventory.c4`; `tests/architecture_test.py`; model refactored to `extend` generated elements | Adding a dummy service with a label makes it appear; without regenerating, the test fails |
 | **3. Flows + docs** | Dynamic views for the six flows; web-component embeds replace the PNGs; new docs page "Keeping the architecture current" | `structure.md` has no static diagrams left |
 | **4. Freshness** | `reviewed`/`paths`/`repo` metadata on hand-written elements; `sync.py --status`; amber styling + "Needs review" view | Touching `fast_server/plc_listener.py` after its `reviewed` date flags the PLC watcher |
 | 5. (optional) Live overlay | Image revision labels, React embed in the dashboard with live health/version | Separate plan if wanted |
 
 Phases 1 and 2 could be swapped (generator first, then hand-write around it). I'd do the model first, so you see the result early and the element ids settle before they're generated.
+
+### Phase 1 notes (as built)
+
+- **Files:** `web/architecture/` has `likec4.config.json`, `spec.c4`, `model/{landscape,ams,edge,connections}.c4` (cross-zone relationships live in `connections.c4`), `views/static.c4` (landscape, robot cell, AMS host, fastapi internals, web, edge, IMU node, camera node, NAS, downstream, "Needs details") and `views/deployment.c4` (machines and networks). `web/scripts/build-architecture.sh` runs `arch:check` then `arch:build`.
+- **Edge modelled per kind of node, not per service:** six identical IMU services would repeat the same three relationships six times. The Pis are deployment instances instead, so phase 2 generates the deployment hosts rather than logical edge elements.
+- **Machines view** shows one box per machine and only the data path (`cip` and `docker` relationships excluded); with no relationships at all Graphviz puts every machine in one row. `**` only includes connected descendants, so the hosts are listed as `<net>.<host>.*`; the generator should write that list too.
+- **Links:** code links point at `main` (`fast_server/run_params.py` 404s until this branch merges); docs links are site-absolute (`/docs/...`). The docs nav link is `/../architecture/` because VitePress prefixes its base onto nav links.
+- **Placeholders** (tag `#placeholder`, listed in the "Needs details" view): image analysis machine, digital twin, AI service, camera host service; TODOs in descriptions for the IMU sensor and camera models and NTP clients.
+- `likec4` pulled react/react-dom 19.2.8 → 19.3.1. Lint is unchanged (the 2 `vite.config.js` `no-undef` errors predate this work).
 
 ## 5. Keeping it current (the workflow)
 
