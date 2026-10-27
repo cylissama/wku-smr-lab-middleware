@@ -1,0 +1,80 @@
+// Element views. Clicking an element that has its own view below opens it.
+global {
+  styleGroup smr {
+    style element.tag = #placeholder { border dashed; opacity 60% }
+    style element.tag = #optional { border dotted; opacity 50% }
+  }
+}
+
+views {
+
+  view index {
+    title 'Lab landscape'
+    description 'Everything in the system and how the parts talk. Click a box to open it.'
+    include *
+    global style smr
+  }
+
+  view robotcell of robotcell {
+    title 'Robot cell'
+    include *
+    global style smr
+  }
+
+  view ams of ams {
+    title 'AMS host'
+    description 'The always-on compose stack (docker-compose.yml).'
+    include *
+    global style smr
+  }
+
+  view fastapi of ams.fastapi {
+    title 'fastapi-app internals'
+    include *
+    global style smr
+  }
+
+  view web of ams.web {
+    title 'web (nginx)'
+    include *
+    global style smr
+  }
+
+  view edge of edge {
+    title 'Edge nodes'
+    description 'Deployed per run by the dashboard through stack-controller (Swarm stack "edge").'
+    include *, edge.imuNode.*, edge.cameraNode.*
+    global style smr
+  }
+
+  view imuNode of edge.imuNode {
+    title 'IMU node'
+    include *
+    global style smr
+  }
+
+  view cameraNode of edge.cameraNode {
+    title 'Camera node'
+    include *
+    global style smr
+  }
+
+  view nas of nas {
+    title 'Synology NAS'
+    include *
+    global style smr
+  }
+
+  view downstream of downstream {
+    title 'Downstream consumers'
+    include *
+    global style smr
+  }
+
+  view placeholders {
+    title 'Needs details'
+    description 'Elements still marked #placeholder. Fill in their description, then remove the tag.'
+    include element.tag = #placeholder
+    global style smr
+  }
+}

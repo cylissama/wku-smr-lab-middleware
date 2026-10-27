@@ -1,0 +1,81 @@
+// Which machine runs what. IMU ids -> hostnames come from deploy/.env
+// (IMU_<id>_HOSTNAME); cameras are placed by node label camera=front/side.
+deployment {
+
+  network cell '192.168.1.x' {
+    description 'Robot cell network.'
+
+    host robot 'FANUC controller' {
+      technology '192.168.1.100'
+      instanceOf robotcell.robot
+    }
+    host plc 'Cell PLC' {
+      technology '192.168.1.103'
+      instanceOf robotcell.plc
+    }
+    host nas 'Synology NAS' {
+      technology '192.168.1.104'
+      instanceOf nas.postgres
+      instanceOf nas.backups
+      instanceOf nas.logs
+    }
+    host rpiimuj1 'RPIIMUJ1' {
+      technology '192.168.1.106, imu-106'
+      instanceOf edge.imuNode
+    }
+    host rpiimuj2 'RPIIMUJ2' {
+      technology '192.168.1.107, imu-107'
+      instanceOf edge.imuNode
+    }
+    host rpiimuj3 'RPIIMUJ3' {
+      technology '192.168.1.108, imu-108'
+      instanceOf edge.imuNode
+    }
+    host rpiimuj4 'RPIIMUJ4' {
+      technology '192.168.1.109, imu-109'
+      instanceOf edge.imuNode
+    }
+    host rpiimuj5 'RPIIMUJ5' {
+      technology '192.168.1.110, imu-110'
+      instanceOf edge.imuNode
+    }
+    host rpicamfront 'RPiCamFront' {
+      technology '192.168.1.113, camera-front (113_front)'
+      instanceOf edge.cameraNode
+    }
+    host camerapi2 'CameraPi2' {
+      technology '192.168.1.114, camera-side (114_side)'
+      instanceOf edge.cameraNode
+    }
+  }
+
+  network amsnet '192.168.2.x' {
+    host iiot 'IIoT (AMS host)' {
+      technology '192.168.2.100'
+      instanceOf ams.mqtt
+      instanceOf ams.fastapi
+      instanceOf ams.tcp
+      instanceOf ams.stackController
+      instanceOf ams.docker
+      instanceOf ams.web
+      instanceOf ams.ntp
+      instanceOf ams.pgadmin
+    }
+  }
+
+  network bench '192.168.4.x' {
+    description 'Bench network.'
+    host rpiimubench 'RPI-IMU-BENCH' {
+      technology 'imu-111 (bench node)'
+      instanceOf edge.imuNode
+    }
+  }
+}
+
+views {
+  deployment view hosts {
+    title 'Machines and networks'
+    description 'Which machine runs what. Addresses: /docs/network/ip-addresses'
+    include cell.**, amsnet.**, bench.**
+  }
+}
