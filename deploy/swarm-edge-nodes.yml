@@ -32,6 +32,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_106_DEVICE_ID}"
       restart_policy:
@@ -83,6 +84,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_107_DEVICE_ID}"
       restart_policy:
@@ -134,6 +136,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_108_DEVICE_ID}"
       restart_policy:
@@ -185,6 +188,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_109_DEVICE_ID}"
       restart_policy:
@@ -236,6 +240,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_110_DEVICE_ID}"
       restart_policy:
@@ -287,6 +292,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "Bench IMU node (RPI-IMU-BENCH). imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_111_DEVICE_ID}"
       restart_policy:
@@ -347,6 +353,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "Front camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_front."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
         # camera/113_front), and that's also its device label in the DB
@@ -390,6 +397,7 @@ services:
     deploy:
       replicas: 1
       labels:
+        smr.description: "Side camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_side."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
         # camera/113_front), and that's also its device label in the DB
