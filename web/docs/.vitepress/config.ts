@@ -104,4 +104,12 @@ export default defineConfig({
       },
     ],
   },
+  vue: {
+    template: {
+      compilerOptions: {
+        // <likec4-view> is the architecture site's web component (see theme/ArchitectureView.vue)
+        isCustomElement: (tag) => tag.startsWith('likec4-'),
+      },
+    },
+  },
 })

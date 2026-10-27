@@ -26,6 +26,9 @@ views {
       '''
     }
     ams.fastapi-app.workers -> ams.fastapi-app.live '"Inserted N IMU rows" to /ws/imu'
+
+    // Top to bottom so it fits the docs column (embedded in overview/structure.md)
+    autoLayout TopBottom
   }
 
   dynamic view robotToDb {
@@ -41,6 +44,9 @@ views {
     ams.fastapi-app.live -> ams.web.dashboard 'pushes it over /ws/robot'
     ams.tcp -> nas.postgres 'RECORD only: robot_worker inserts a batch every BATCHES rows or B_TIMEOUT s'
     ams.tcp -> ams.fastapi-app.live '"Inserted N robot rows" via POST /send/robot'
+
+    // Top to bottom so it fits the docs column (embedded in overview/structure.md)
+    autoLayout TopBottom
   }
 
   dynamic view startMonitoring {
@@ -127,6 +133,9 @@ views {
     ams.fastapi-app.backup -> nas.postgres 'pg_dump'
     ams.fastapi-app.backup -> nas.backups 'writes the .dump file to /db_backups'
     ams.fastapi-app.sessions -> ams.fastapi-app.live '/ws/misc: session ended, backup result'
+
+    // Top to bottom so it fits the docs column (embedded in overview/structure.md)
+    autoLayout TopBottom
   }
 
   dynamic view liveUpdates {
