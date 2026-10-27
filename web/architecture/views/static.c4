@@ -28,7 +28,7 @@ views {
     global style smr
   }
 
-  view fastapi of ams.fastapi {
+  view fastapi of ams.fastapi-app {
     title 'fastapi-app internals'
     include *
     global style smr

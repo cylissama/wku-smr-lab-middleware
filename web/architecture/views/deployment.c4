@@ -1,9 +1,10 @@
-// Which machine runs what. IMU ids -> hostnames come from deploy/.env
-// (IMU_<id>_HOSTNAME); cameras are placed by node label camera=front/side.
+// Which machine runs what. The edge Pis (network "edgepis") are generated
+// into generated/edge-hosts.c4 from deploy/swarm-edge-nodes.yml; the fixed
+// machines are here. Addresses: docs IP table.
 deployment {
 
   network cell '192.168.1.x' {
-    description 'Robot cell network.'
+    description 'Robot cell network. The IMU and camera Pis are on it too (bench IMU on 192.168.4.x).'
 
     host robot 'FANUC controller' {
       technology '192.168.1.100'
@@ -17,48 +18,12 @@ deployment {
       technology '192.168.1.104'
       instanceOf nas
     }
-    host rpiimuj1 'RPIIMUJ1' {
-      technology '192.168.1.106, imu-106'
-      instanceOf edge.imuNode
-    }
-    host rpiimuj2 'RPIIMUJ2' {
-      technology '192.168.1.107, imu-107'
-      instanceOf edge.imuNode
-    }
-    host rpiimuj3 'RPIIMUJ3' {
-      technology '192.168.1.108, imu-108'
-      instanceOf edge.imuNode
-    }
-    host rpiimuj4 'RPIIMUJ4' {
-      technology '192.168.1.109, imu-109'
-      instanceOf edge.imuNode
-    }
-    host rpiimuj5 'RPIIMUJ5' {
-      technology '192.168.1.110, imu-110'
-      instanceOf edge.imuNode
-    }
-    host rpicamfront 'RPiCamFront' {
-      technology '192.168.1.113, camera-front (113_front)'
-      instanceOf edge.cameraNode
-    }
-    host camerapi2 'CameraPi2' {
-      technology '192.168.1.114, camera-side (114_side)'
-      instanceOf edge.cameraNode
-    }
   }
 
   network amsnet '192.168.2.x' {
     host iiot 'IIoT (AMS host)' {
       technology '192.168.2.100'
       instanceOf ams
-    }
-  }
-
-  network bench '192.168.4.x' {
-    description 'Bench network.'
-    host rpiimubench 'RPI-IMU-BENCH' {
-      technology 'imu-111 (bench node)'
-      instanceOf edge.imuNode
     }
   }
 }
@@ -69,12 +34,16 @@ views {
     description 'Which machine runs what, with the data path only. PLC and Swarm connections are in the other views; addresses in the docs IP table.'
     link /docs/network/ip-addresses 'IP Address Table'
     include
-      cell, cell.*,
-      cell.robot.*, cell.plc.*, cell.nas.*, cell.rpiimuj1.*, cell.rpiimuj2.*, cell.rpiimuj3.*, cell.rpiimuj4.*, cell.rpiimuj5.*, cell.rpicamfront.*, cell.camerapi2.*,
-      amsnet, amsnet.*,
+      cell,
+      cell.*,
+      cell.robot.*,
+      cell.plc.*,
+      cell.nas.*,
+      amsnet,
+      amsnet.*,
       amsnet.iiot.*,
-      bench, bench.*,
-      bench.rpiimubench.*
+      edgepis,
+      edgepis.**
     // Only the data path, which also lays the machines out in layers;
     // PLC and Swarm-scheduling connections are in the other views
     exclude * -> * where kind is cip

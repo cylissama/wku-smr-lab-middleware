@@ -54,14 +54,14 @@ specification {
   }
 
   // --- Relationship kinds (protocol) ---
-  relationship mqtt   { technology 'MQTT'; color primary }
-  relationship http   { technology 'HTTP' }
-  relationship sql    { technology 'PostgreSQL'; color secondary; line dashed }
-  relationship tcp    { technology 'TCP'; color amber }
-  relationship cip    { technology 'EtherNet/IP (CIP)'; color amber; line dotted }
-  relationship nfs    { technology 'NFS'; color gray; line dashed }
+  relationship mqtt { technology 'MQTT'; color primary }
+  relationship http { technology 'HTTP' }
+  relationship sql { technology 'PostgreSQL'; color secondary; line dashed }
+  relationship tcp { technology 'TCP'; color amber }
+  relationship cip { technology 'EtherNet/IP (CIP)'; color amber; line dotted }
+  relationship nfs { technology 'NFS'; color gray; line dashed }
   relationship docker { technology 'Docker API'; color gray; line dotted }
-  relationship local  { technology 'local'; color gray; line dotted }
+  relationship local { technology 'local'; color gray; line dotted }
 
   // --- Tags ---
   tag placeholder   // details unknown; fill in (see the element's description)
@@ -71,6 +71,10 @@ specification {
   // --- Deployment ---
   deploymentNode network {
     notation 'Subnet'
+    style { color slate; opacity 10% }
+  }
+  deploymentNode swarm {
+    notation 'Swarm workers'
     style { color slate; opacity 10% }
   }
   deploymentNode host {
