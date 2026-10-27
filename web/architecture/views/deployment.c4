@@ -15,9 +15,7 @@ deployment {
     }
     host nas 'Synology NAS' {
       technology '192.168.1.104'
-      instanceOf nas.postgres
-      instanceOf nas.backups
-      instanceOf nas.logs
+      instanceOf nas
     }
     host rpiimuj1 'RPIIMUJ1' {
       technology '192.168.1.106, imu-106'
@@ -52,14 +50,7 @@ deployment {
   network amsnet '192.168.2.x' {
     host iiot 'IIoT (AMS host)' {
       technology '192.168.2.100'
-      instanceOf ams.mqtt
-      instanceOf ams.fastapi
-      instanceOf ams.tcp
-      instanceOf ams.stackController
-      instanceOf ams.docker
-      instanceOf ams.web
-      instanceOf ams.ntp
-      instanceOf ams.pgadmin
+      instanceOf ams
     }
   }
 
@@ -75,7 +66,18 @@ deployment {
 views {
   deployment view hosts {
     title 'Machines and networks'
-    description 'Which machine runs what. Addresses: /docs/network/ip-addresses'
-    include cell.**, amsnet.**, bench.**
+    description 'Which machine runs what, with the data path only. PLC and Swarm connections are in the other views; addresses in the docs IP table.'
+    link /docs/network/ip-addresses 'IP Address Table'
+    include
+      cell, cell.*,
+      cell.robot.*, cell.plc.*, cell.nas.*, cell.rpiimuj1.*, cell.rpiimuj2.*, cell.rpiimuj3.*, cell.rpiimuj4.*, cell.rpiimuj5.*, cell.rpicamfront.*, cell.camerapi2.*,
+      amsnet, amsnet.*,
+      amsnet.iiot.*,
+      bench, bench.*,
+      bench.rpiimubench.*
+    // Only the data path, which also lays the machines out in layers;
+    // PLC and Swarm-scheduling connections are in the other views
+    exclude * -> * where kind is cip
+    exclude * -> * where kind is docker
   }
 }

@@ -101,6 +101,11 @@ model {
         description 'This documentation, served under /docs/.'
         link /docs/ 'Docs'
       }
+      architecture = component 'Architecture site' {
+        technology 'LikeC4'
+        description 'This site, built from web/architecture/ and served under /architecture/.'
+        link https://github.com/cylissama/wku-smr-lab-middleware/tree/main/web/architecture 'web/architecture/'
+      }
     }
 
     ntp = service 'ntp' {
