@@ -1,21 +1,38 @@
-# Inertial Measurement Unit: IMU Nodes
- 
+# IMU nodes
 
-Wiki for what an [IMU](https://en.wikipedia.org/wiki/Inertial_measurement_unit) is.
+Wikipedia: [inertial measurement unit](https://en.wikipedia.org/wiki/Inertial_measurement_unit).
 
-## IMU nodes
+Each robot joint has a Raspberry Pi with a BNO08x 9-DoF IMU on I2C. Code: [wku-smr-lab-imu-edge-node](https://github.com/cylissama/wku-smr-lab-imu-edge-node), installed on each Pi at `/opt/smart-mfg-imu`.
 
-Each IMU joint is a Raspberry Pi running a BNO08x 9-DoF IMU over I2C, split into two cooperating processes:
+## Nodes
 
-1. **`imu_host`** — a Pi-local (non-containerized) hardware service that talks to the IMU directly over I2C and exposes a Unix socket at `/run/imu-hw/imu.sock`. It's installed as a `systemd` service so it survives reboots.
-2. **`imu_edge`** — a containerized service, deployed via Docker Swarm, that connects to `imu_host` through that socket and publishes readings over MQTT (`imu/<device_id>`).
+| Swarm service | Device key / MQTT topic | Pi (hostname) | Address |
+| --- | --- | --- | --- |
+| `imu-106` | `imu/106` | RPIIMUJ1 | 192.168.1.106 |
+| `imu-107` | `imu/107` | RPIIMUJ2 | 192.168.1.107 |
+| `imu-108` | `imu/108` | RPIIMUJ3 | 192.168.1.108 |
+| `imu-109` | `imu/109` | RPIIMUJ4 | 192.168.1.109 |
+| `imu-110` | `imu/110` | RPIIMUJ5 | 192.168.1.110 |
+| `imu-111` | `imu/111` | RPI-IMU-BENCH | bench node, currently on 192.168.4.x |
 
-This host-service-plus-container split exists specifically because Docker Swarm on these nodes cannot grant a task sandbox usable device-cgroup access to `i2c-1` — see [Docker \> Swarm](/docker/swarm) for the full story. The `imu_host` process, running directly on the Pi, is what actually has permission to open the I2C bus.
+Device ids and hostnames come from `deploy/.env` (`IMU_106_DEVICE_ID`, `IMU_106_HOSTNAME`, …). Each service is pinned to its Pi with `node.hostname == ${IMU_<id>_HOSTNAME}`.
 
-Each IMU Pi is joined to the Swarm as a worker and labeled with its own device ID (`device_id=<node-ip>`) so the matching `imu_edge` Swarm service is always scheduled onto the correct physical node.
+## Two processes per Pi
 
+1. **`imu_host`**: a Pi-local service, not in a container, run by `systemd` as `imu-hw`. It talks to the IMU over I2C and serves a small HTTP API on the Unix socket `/run/imu-hw/imu.sock` (`/v1/readyz`, `/v1/status`, session start/stop, tare, a telemetry stream).
+2. **`imu_edge`**: the container that the edge stack runs (image `smart-mfg-imu:latest`). It starts a session on `imu_host` with the requested sample rate, reads the telemetry stream, and publishes each sample over MQTT to `imu/<device_id>`. It also writes a CSV under `/opt/smart-mfg-imu/data`.
 
-# IMU Data Format
+The split exists because Docker Swarm can't give a container usable access to `/dev/i2c-1`. See [Swarm](/docker/swarm#known-limitation-i2c-device-access-under-swarm-resolved). Setting up a new Pi is covered in [Bringing a node online](/expanding/swarm-nodes).
+
+## PLC trigger mode
+
+With `IMU_PLC_TRIGGER=true`, an IMU waits for the [PLC](/hardware/plc)'s `Data_Start` pulse before sending, tares on `IMU_Tare`, and stops sending on `Db_Stop` (or after `IMU_PLC_MAX_RUN_S`). `fastapi-app` sets this on every deploy: off while monitoring, on for a session unless the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD` says otherwise. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
+
+## Sample rate
+
+`IMU_SAMPLE_HZ` (default 100, set per run in [Run parameters](/operations/run-parameters)) is sent to `imu_host` when the container starts its session. While monitoring or recording, the Devices box shows the rate actually arriving (`receiving · N msg/s`).
+
+## IMU data format
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
@@ -39,7 +56,11 @@ Each IMU Pi is joined to the Swarm as a worker and labeled with its own device I
 | `frame_id` | Integer | Frame/sequence identifier for the sample | `87` |
 | `capture_time` | Integer (epoch ms) | Timestamp when the sensor captured the sample | `1775679031099` |
 
-## Notes
+### Notes
 
-- Units for `accel_*` and `mag_*` are inferred (g and µT respectively) — worth confirming against your device spec since they weren't explicit in the data.
-- `gyro_x/y/z` are all `0` in this sample, so units couldn't be confirmed from the data alone (likely deg/s or rad/s).
+- On the wire, each MQTT message on `imu/<device_id>` is one comma-separated sample: `counter, capture_time_ms, recorded_at_time_ms, accel_x…z, gyro_x…z, mag_x…z, yaw, pitch, roll, device_id` (parsed by `fast_server/parsing.py`).
+- [Database structure](/data/database-structure#_2-6-imu-measurement) lists the units as m/s², rad/s and µT, which is what the Adafruit BNO08x library reports.
+
+::: info Placeholder
+TODO: confirm the units against the `imu_host` code, and whether `accel_*` is linear acceleration (gravity removed). The sample above shows `accel_z` ≈ 0, not ≈ 9.8.
+:::

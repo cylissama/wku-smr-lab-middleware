@@ -1,9 +1,25 @@
-## Camera nodes
+# Camera nodes
 
-Raspberry Pis fitted with cameras run the camera sensor-fusion pipeline (ArUco/marker pose detection) and publish frame + marker pose data to MQTT under `camera/<device_id>_<name>` (e.g. `camera/113_front`), only for frames where a marker is detected. No marker in view means no messages. A separate image-analysis machine consumes and processes the camera stream.
+Raspberry Pis with cameras run the camera sensor-fusion pipeline: ArUco marker pose detection (code: [camera_sensor_fusion](https://github.com/UmarKhattab09/camera_sensor_fusion)). They publish each frame's marker poses over MQTT to `camera/<device_id>_<name>`, for example `camera/113_front`. A message is sent only for frames where a marker is detected, so **no marker in view means no messages**, and the Devices box then shows *running · no data*.
 
+## Nodes
 
-# Marker Pose Data Format: Data from the Camera Nodes
+| Swarm service | Device key / MQTT topic | Pi (hostname) | Placement |
+| --- | --- | --- | --- |
+| `camera-front` | `camera/113_front` | RPiCamFront | `node.labels.camera == front` |
+| `camera-side` | `camera/114_side` | CameraPi2 | `node.labels.camera == side` |
+
+Device ids, names and calibration files come from `deploy/.env` (`CAMERA_FRONT_DEVICE_ID`, `CAMERA_FRONT_NAME`, `CAMERA_FRONT_CALIBRATION_PATH`, …). The containers (image `camera-edge:latest`) mount `/run/camera-hw` and `/opt/camera-sensor-fusion/data` from the Pi.
+
+::: warning Calibration placeholders
+`deploy/.env.example` points both cameras at `calib/PLACEHOLDER_front_1920x1080.yml`. Check that each camera has its own real calibration file.
+:::
+
+::: info Placeholder
+TODO: the camera Pi's host-side setup (what provides `/run/camera-hw`, how `camera-edge:latest` is built), and what the image-analysis machine does with the stream. To view a camera's live video, see [Camera live feed](/operations/camera-ops).
+:::
+
+## Marker pose data format
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|
@@ -23,7 +39,7 @@ Raspberry Pis fitted with cameras run the camera sensor-fusion pipeline (ArUco/m
 | `session_id` | Integer | Identifier of the recording session | `318` |
 | `capture_time` | String/Float | Timestamp when the frame was captured (`NaN` if unavailable) | `NaN` |
 
-## Notes
+### Notes
 
 - `rvec_x/y/z` and `tvec_x/y/z` follow the OpenCV pose convention: `rvec` is a Rodrigues rotation vector and `tvec` is a translation vector, together forming the marker's 6-DOF pose relative to the camera.
 - Units for `tvec_*` are inferred (likely meters) — worth confirming against your camera calibration setup.

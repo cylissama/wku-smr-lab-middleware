@@ -1,46 +1,48 @@
 # Github Repos
 
-All repos associated with this project
+All repositories that make up the system.
 
+## GitHub
 
-## Github
+### [Active Middleware Services (AMS)](https://github.com/cylissama/wku-smr-lab-middleware)
 
+This repository: every service on the AMS host and their Docker setup.
 
-[Active Middleware Services (AMS)](https://github.com/cylissama/wku-smr-lab-middleware)
+- `fastapi-app` (FastAPI backend: ingestion, sessions, backups, WebSockets)
+- `tcp` (robot TCP server)
+- `web` (dashboard and this documentation site)
+- `stack-controller` (Swarm deploy agent, watchdog, logs)
+- MQTT broker, NTP and pgAdmin configuration
+- The edge Swarm stack file, `deploy/swarm-edge-nodes.yml`
 
-This is the main repository for the middle ware services and their Docker containers
+Active work happens on `dev/*` branches and is merged into `main` by pull request.
 
-AMS includes
-- FastAPI Backend
-- Dashboard Web Frontend, including documentation
-- NTP Service
-- MQTT Service
-- TCP Server
+### [IMU Edge Node](https://github.com/cylissama/wku-smr-lab-imu-edge-node)
 
-Each of these services is explained in detail elsewhere
+The code on each IMU Raspberry Pi, a revision of the original IMU node by Masion and Cing:
 
----
+- `imu_host`, the Pi-local hardware service
+- `imu_edge`, the container that publishes over MQTT and handles the PLC trigger
 
-[IMU Edge Node](https://github.com/cylissama/wku-smr-lab-imu-edge-node)
+The `plc_update` branch has the PLC tag logic (`imu_edge/plc_signals.py`). See [IMU nodes](/hardware/imu).
 
-A revision of the orignal IMU Node code written by Masion and Cing. This code restructures the rpi board controls and data publishing to create a *Swarm* ready architecure.
+### [Camera Edge Node](https://github.com/UmarKhattab09/camera_sensor_fusion)
 
----
+Camera sensor-fusion code: ArUco marker pose detection, published over MQTT. See [Camera nodes](/hardware/camera).
 
-[Camera Edge Node](https://github.com/UmarKhattab09/camera_sensor_fusion)
+::: info Placeholder
+TODO: which branch the camera Pis run, and how the `camera-edge:latest` image is built on them.
+:::
 
----
+### Older repositories
 
-### Docker Hub
+- [Data Broker Middleware (original)](https://github.com/Mseavers1/CS560-Smart-Manufacturing-Data): the first version of the middleware.
+- [Previous IMU Node](https://github.com/mcbuckle/smart-mfg-imu): the original IMU node implementation.
 
-[Cy's Docker Hub Account](https://hub.docker.com/repositories/cylissama) 
+## Docker Hub
 
-Containers with Compose/Swarm YML ready images such as 
-  
- - Middleware
-    - smr-robot-tcp-communication
-    - smr-frontend-webui
-    - smr-backend-fastapi
-- Device Nodes
-    - imu_node
+[Cy's Docker Hub account](https://hub.docker.com/repositories/cylissama) has published images (`smr-robot-tcp-communication`, `smr-frontend-webui`, `smr-backend-fastapi`, `imu_node`).
 
+::: info Placeholder
+TODO: confirm whether these images are still published and used. Today the AMS images are built on the AMS host (`docker compose build`), and the edge images (`smart-mfg-imu:latest`, `camera-edge:latest`) exist locally on each Pi (deployed with `--resolve-image never`).
+:::

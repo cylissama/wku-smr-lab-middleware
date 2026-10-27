@@ -53,6 +53,26 @@ docker compose up -d fastapi-app tcp
 
 A container failed its health check, was restarted 3 times in 15 minutes, and is still unhealthy. Expand it in Container Health: the last health checks and log lines say why. Fix the cause, then restart it with `docker compose up -d <service>`; the watchdog resets once it's healthy again.
 
+## A device isn't sending
+
+In the **Devices** box a device stays grey or red while monitoring or recording, or its rate is 0.
+
+1. Check its Swarm state in the same box. `pending` or `rejected` means Swarm couldn't place or start it: see [Swarm troubleshooting](/docker/swarm#troubleshooting) and [Stack controller troubleshooting](/docker/stack-controller#troubleshooting).
+2. If it's `running` but not receiving, check the Pi itself: is it on, and can it reach the broker at `192.168.2.100:1883`? Logs: `docker service logs edge_imu-106` (or the device's service name) on the AMS host.
+3. Robot: the robot connects to the AMS on port 5001, not through Swarm. See [Robot TCP server down](#robot-tcp-server-down).
+
+## No IMU data after Start Session
+
+IMU data arrived while monitoring but stops once the session starts. This is usually expected: when recording, the IMUs wait for the PLC's `Data_Start` before streaming, so data begins when the robot program starts, not when you click Start Session. If it never starts, check the PLC and the trigger settings: [IMU PLC trigger](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
+
+## PLC entry red, or the session didn't stop by itself
+
+See [PLC auto stop → Checking it](/operations/plc-auto-stop#checking-it) for what each message means. While the PLC is unreachable a `Db_Stop` pulse is missed, so stop the session with the button.
+
+::: info Placeholder
+TODO: common PLC-side fixes (who to ask, where the PLC program lives, how to tell if the robot program changed).
+:::
+
 ## Robot TCP server down
 
 The robot can't stream. Check `tcp` in Container Health. A red **Robot TCP server** chip with `tcp can't reach the database` is the database problem above, seen from the robot side.

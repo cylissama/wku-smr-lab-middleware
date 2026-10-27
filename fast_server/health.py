@@ -2,7 +2,7 @@
 # paths), reported by GET /health and shown on the dashboard. Each component
 # flips between ok/down; transitions -- not every retry -- are logged as
 # important events and broadcast on /ws/misc. See
-# plans/dashboard-decouple-plan.md §B.
+# plans/completed/dashboard-decouple-plan.md §B.
 
 import asyncio
 import logging

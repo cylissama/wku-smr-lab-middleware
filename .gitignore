@@ -36,3 +36,6 @@ pgadmin/generated/
 
 # graphify knowledge graph output (regenerate with /graphify)
 graphify-out/
+
+# Claude Code local settings (personal plugin choices)
+.claude/

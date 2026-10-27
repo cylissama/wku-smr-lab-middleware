@@ -7,7 +7,7 @@
 > (styled like the left Device Rail) that shows each parameter's current value,
 > can be edited between runs, and is locked while a session is recording.
 
-> **Status (2026-10-22):** built on `dev/device-graphics`, not yet deployed.
+> **Status (2026-10-22):** built, deployed and committed on `dev/device-graphics` (`ed4e035`).
 > Decisions: edits allowed in MONITOR with an immediate redeploy; the §3 list
 > minus `CAMERA_MARKER_LENGTH_M` (dropped: never changed);
 > `IMU_SAMPLE_HZ` capped at 200 (not load-tested); values stay set between runs.

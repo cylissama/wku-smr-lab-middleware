@@ -22,13 +22,13 @@ features:
     details: What the platform does and how the repository is organized.
     link: /overview/what-is-this
   - title: Hardware
-    details: IMU nodes, camera nodes, the robot, and the machines that run the middleware.
+    details: IMU nodes, camera nodes, the robot, the cell PLC, and the machines that run the middleware.
     link: /hardware/
   - title: Data
     details: How telemetry is stored, queried, backed up — and the tables behind it.
     link: /data/database-uses
   - title: Docker
-    details: The Compose stack, the IMU Swarm cluster, and what runs automatically.
+    details: The Compose stack, the edge Swarm, the API, health checks, and what runs automatically.
     link: /docker/compose
   - title: Network
     details: Hosts, IP addresses, and ports across the lab network.
@@ -36,4 +36,7 @@ features:
   - title: Expanding
     details: How to bring a new node or service online.
     link: /expanding/
+  - title: Operations
+    details: Running a test session, run parameters, PLC auto stop, and troubleshooting.
+    link: /operations/running-a-test
 ---

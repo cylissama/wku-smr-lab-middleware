@@ -27,6 +27,8 @@ export default defineConfig({
         items: [
           { text: 'What is this project?', link: '/overview/what-is-this' },
           { text: 'How is this structured?', link: '/overview/structure' },
+          { text: 'Capture modes & sessions', link: '/overview/capture-modes' },
+          { text: 'The dashboard', link: '/overview/dashboard' },
           { text: 'Github Repos', link: '/overview/repositories' },
         ],
       },
@@ -38,6 +40,7 @@ export default defineConfig({
           { text: 'IMU Nodes', link: '/hardware/imu' },
           { text: 'Camera Nodes', link: '/hardware/camera' },
           { text: 'Robot Arm', link: '/hardware/robot-arm' },
+          { text: 'Cell PLC', link: '/hardware/plc' },
         ],
       },
       {
@@ -54,6 +57,7 @@ export default defineConfig({
         text: 'Docker',
         items: [
           { text: 'Compose', link: '/docker/compose' },
+          { text: 'API reference', link: '/docker/api' },
           { text: 'Swarm', link: '/docker/swarm' },
           { text: 'Stack controller & device selection', link: '/docker/stack-controller' },
           { text: 'Health & logs', link: '/docker/health-and-logs' },

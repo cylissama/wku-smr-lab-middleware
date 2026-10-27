@@ -6,7 +6,9 @@
 
 **Schema:** `public`
 
-**Tables:** `device`, `session`, `session_device`, `image_detection`, `imu_measurement`, `robot`
+**Tables:** `device`, `session_label`, `session`, `session_device`, `image_detection`, `imu_measurement`, `robot`
+
+**Source of truth:** `db/schema.sql` (from-scratch schema) and `db/migrations.md` (changes applied to the NAS database).
 
 ---
 
@@ -15,13 +17,18 @@
 The database captures synchronized multi-modal sensor data (IMU readings, marker/AprilTag-style image detections, and robot arm pose) collected across recording **sessions** from a set of registered **devices**.
 
 - `device` — registry of every physical sensor/device in the system.
-- `session` — a discrete data-collection run.
+- `session_label` — the session types offered in the Start Session dropdown.
+- `session` — a discrete data-collection run, with its type, device selection and run parameters.
 - `session_device` — join table linking which devices participated in which sessions (many-to-many).
 - `imu_measurement`, `image_detection`, `robot` — the three time-series measurement tables, each tied to exactly one `device` and one `session`.
 
 ### Entity-Relationship Diagram
 
 ![Database ER Diagram](er_diagram.png)
+
+::: info Placeholder
+TODO: regenerate the ER diagram. It predates `session_label` and the `session.session_label_id` / `devices` / `parameters` columns.
+:::
 
 *Orange lines: `device` → measurement/junction table relationships (1:N). Green lines: `session` → measurement/junction table relationships (1:N). `session_device` implements the many-to-many relationship between `device` and `session`.*
 
@@ -36,25 +43,36 @@ Registry of physical devices (sensors, cameras, robot controllers) in the system
 | Column | Type | Nullable | Default | Key | Notes |
 |---|---|---|---|---|---|
 | `id` | `integer` | NO | — | **PK** | Unique device identifier |
-| `label` | `text`¹ | NO | — | UQ | Human-readable, unique device name |
-| `category` | `text`¹ | NO | — | | Device type/class (e.g. IMU, camera, robot) |
-| `ip_address` | `text`¹ | NO | — | | Network address of the device |
+| `label` | `text` | NO | — | UQ | Human-readable, unique device name |
+| `category` | `text` | NO | — | | Device type/class (e.g. IMU, camera, robot) |
+| `ip_address` | `text` | NO | — | | Network address of the device |
 | `registered_at` | `double precision` | NO | — | | Unix timestamp of device registration |
 
-### 2.2 `session`
+### 2.2 `session_label`
+
+The session types offered in the dashboard's Start Session dropdown (`GET /session/labels`). Adding a type is an `INSERT`, not a schema change ([how](/data/schema-changes#example-session-label)).
+
+| Column | Type | Nullable | Default | Key | Notes |
+|---|---|---|---|---|---|
+| `id` | `integer` | NO | serial | **PK** | |
+| `name` | `text` | NO | — | UQ | e.g. `Full System`, `Robot and IMU`, `Six-Joint`, `Legacy / Unspecified` |
+
+### 2.3 `session`
 
 A discrete data-collection run.
 
 | Column | Type | Nullable | Default | Key | Notes |
 |---|---|---|---|---|---|
 | `id` | `bigint` | NO | — | **PK** | Unique session identifier |
-| `label` | `text`¹ | NO | — | UQ | Human-readable, unique session name |
+| `label` | `text` | NO | — | UQ | Human-readable, unique session name |
 | `started_at` | `double precision` | NO | — | | Unix timestamp session began |
 | `ended_at` | `double precision` | YES | — | | Unix timestamp session ended (null while in progress) |
-| `is_test_session` | `boolean`¹ | NO | `true` | | Flags whether this is a test run vs. a real data-collection run |
+| `is_test_session` | `boolean` | NO | `true` | | Flags whether this is a test run vs. a real data-collection run |
+| `session_label_id` | `integer` | NO | — | FK → `session_label.id` | Session type picked at start (`?session_label=` on `/session/start`) |
 | `devices` | `jsonb` | YES | — | | Device keys selected for this run, e.g. `["imu/106", "robot/main"]`; `NULL` = every device (all sessions before Oct 2026) |
+| `parameters` | `jsonb` | YES | — | | [Run parameters](/operations/run-parameters) the edge stack was deployed with, e.g. `{"IMU_SAMPLE_HZ": 100, ...}`; `NULL` for sessions before Oct 22 2026 |
 
-### 2.3 `session_device`
+### 2.4 `session_device`
 
 Join table associating devices with the sessions they participated in (many-to-many).
 
@@ -65,7 +83,7 @@ Join table associating devices with the sessions they participated in (many-to-m
 
 Composite primary key on (`session_id`, `device_id`).
 
-### 2.4 `image_detection`
+### 2.5 `image_detection`
 
 Per-frame marker/AprilTag pose detections from camera devices (OpenCV-style rotation/translation vectors).
 
@@ -80,14 +98,14 @@ Per-frame marker/AprilTag pose detections from camera devices (OpenCV-style rota
 | `tvec_x` | `double precision` | NO | — | | Translation vector X (**m**) |
 | `tvec_y` | `double precision` | NO | — | | Translation vector Y (**m**) |
 | `tvec_z` | `double precision` | NO | — | | Translation vector Z (**m**) |
-| `image_path` | `text`¹ | NO | — | | Path to the associated captured image |
+| `image_path` | `text` | NO | — | | Path to the associated captured image |
 | `recorded_at` | `double precision` | NO | — | | Unix timestamp the detection was recorded |
 | `ingested_at` | `double precision` | NO | — | | Unix timestamp the row was ingested into the DB |
 | `device_id` | `integer` | NO | — | FK → `device.id` | |
 | `session_id` | `bigint` | NO | — | FK → `session.id` | |
 | `capture_time` | `double precision` | YES | — | | Unix timestamp of image capture |
 
-### 2.5 `imu_measurement`
+### 2.6 `imu_measurement`
 
 Raw and fused IMU readings.
 
@@ -113,7 +131,7 @@ Raw and fused IMU readings.
 | `frame_id` | `bigint` | YES | — | | Associated video/capture frame identifier |
 | `capture_time` | `double precision` | YES | — | | Unix timestamp from the device's own clock |
 
-### 2.6 `robot`
+### 2.7 `robot`
 
 Robot arm joint positions and tool-center-point (TCP) pose.
 
@@ -139,7 +157,7 @@ Robot arm joint positions and tool-center-point (TCP) pose.
 | `session_id` | `bigint` | NO | — | FK → `session.id` | |
 | `frame_id` | `bigint` | YES | — | | Associated video/capture frame identifier |
 
-¹ *Exact underlying type (e.g. `varchar`, `text`, `boolean`, `inet`) could not be resolved from the metadata query used — the values shown are the most likely type based on content and default values. Confirm against `\d+ <table>` in `psql` if exact precision matters for your documentation.*
+Types are as declared in `db/schema.sql`.
 
 ---
 
@@ -155,6 +173,7 @@ Robot arm joint positions and tool-center-point (TCP) pose.
 | `robot` | `session_id` | → | `session` | `id` | N : 1 |
 | `session_device` | `device_id` | → | `device` | `id` | N : 1 |
 | `session_device` | `session_id` | → | `session` | `id` | N : 1 |
+| `session` | `session_label_id` | → | `session_label` | `id` | N : 1 |
 
 `device` ⟷ `session` is effectively **many-to-many**, realized through the `session_device` junction table.
 
@@ -177,8 +196,11 @@ Robot arm joint positions and tool-center-point (TCP) pose.
 | `imu_measurement` | `imu_measurement_device_id_recorded_at_idx` | B-tree on (`device_id`, `recorded_at` DESC) |
 | `robot` | `robot_pkey` | Unique B-tree on (`id`) |
 | `robot` | `robot_device_id_recorded_at_idx` | B-tree on (`device_id`, `recorded_at` DESC) |
+| `imu_measurement` | `imu_measurement_session_id_device_id_recorded_at_idx` | B-tree on (`session_id`, `device_id`, `recorded_at`) |
+| `image_detection` | `image_detection_session_id_frame_idx_idx` | B-tree on (`session_id`, `frame_idx`) |
+| `robot` | `idx_robot_session_frame` | B-tree on (`session_id`, `frame_id`) |
 
-Each measurement table carries a composite `(device_id, recorded_at DESC)` index, optimized for "most recent readings for a given device" queries.
+Each measurement table carries a composite `(device_id, recorded_at DESC)` index, optimized for "most recent readings for a given device" queries. The `session_id`-first indexes serve the usual student query, "everything from session X" ([writing fast queries](/data/accessing-database#writing-queries-that-don-t-slow-down-the-lab)).
 
 ---
 

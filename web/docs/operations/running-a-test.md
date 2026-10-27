@@ -1,114 +1,55 @@
 # Running a test session
 
-Current as of Apr 20, 2026. This replaces the older per-device `docker compose --env-file ... up -d` workflow for IMU nodes — IMUs are now launched from the Swarm manager instead of individually. All operations listed here are assumed to run on the Alienware PC or the Swarm manager unless stated otherwise.
+The procedure for recording one robot run. Since October 2026 everything except the robot itself is driven from the [dashboard](/overview/dashboard): it starts the selected IMUs and cameras, records, and takes them back down. You no longer deploy anything over SSH.
 
 ## Overview
 
-1. Initialize the middleware.
-2. Confirm the IMU RPIs are powered on and their host services are healthy.
-3. Start the camera nodes.
-4. Deploy the IMU Swarm stack from the manager.
-5. Confirm the dashboard is listening.
-6. Start a session from the dashboard.
-7. Confirm the IMU services are actively publishing.
-8. Start the robot.
-9. Stop the IMU services and session when the robot run ends.
-10. Review the collected data.
+1. Check the dashboard and the AMS are healthy.
+2. Check the edge Pis are up.
+3. Choose devices and check the run parameters.
+4. (Optional) Monitor to check the devices are sending.
+5. Start the session.
+6. Start the robot.
+7. Stop: automatically when the robot finishes, or with Stop Session.
+8. Review the data.
 
-## 1. Initialize the middleware
+## 1. Check the dashboard and the AMS
 
-The middleware runs on the MiniPC at `192.168.1.76` and is normally already up — check the [Dashboard](http://192.168.2.100/) first. If it's reachable and showing healthy listeners, skip to step 2. Otherwise, SSH into the middleware host (credentials via the lab's password manager, not written here) and start it:
+Open the [Dashboard](http://192.168.2.100/). The **System Health** strip should be all green, and the **Container Health** box at the bottom should show every container as healthy. If something is red, see [Troubleshooting](/operations/troubleshooting).
+
+The AMS stack is always on. If the dashboard doesn't load at all, SSH to the [AMS host](/hardware/data-broker-mini-pc) and start it:
 
 ```bash
-ssh data-team@192.168.1.76
-cd smart_manufacturing_research/project
+ssh data-team@192.168.2.100
+cd /home/ubuntu/wku-smr-lab-middleware
 docker compose up -d
 ```
 
-`up` creates and starts the services defined in `docker-compose.yml`; `-d` runs them detached so the terminal returns immediately instead of streaming logs.
+## 2. Check the edge Pis
 
-If image analysis is also required, start it on the image analysis machine:
+The IMU and camera Pis must be powered on and in the Swarm. On the AMS host, `docker node ls` should show each one as `Ready` (see the node list in [Swarm](/docker/swarm#the-cluster)). On the dashboard, a device whose Pi is down sits at *starting* and never becomes *running* after you start monitoring.
 
-```bash
-ssh username@192.168.1.113
-cd camera_sensor_fusion/pi-stream/
-docker compose up -d
-```
-
-## 2. Confirm the IMU RPIs are ready
-
-Before deploying the Swarm stack, make sure each IMU Pi is powered on and its host-side hardware service is healthy. The active IMU RPIs are `192.168.1.83`, `.84`, and `.85`. Each should already have the `imu-hw` systemd service installed per [Bringing a node online](/expanding/swarm-nodes).
+Each IMU Pi also runs the `imu-hw` host service. If an IMU starts but never sends, check it on that Pi:
 
 ```bash
-ssh admin@192.168.1.83
+ssh admin@192.168.1.106          # RPIIMUJ1; .107–.110 for J2–J5
 sudo systemctl status imu-hw --no-pager
-ls -l /run/imu-hw/imu.sock
-curl --unix-socket /run/imu-hw/imu.sock http://localhost/v1/readyz
+curl --unix-socket /run/imu-hw/imu.sock http://localhost/v1/readyz   # "ready": true
 ```
 
-Repeat for `.84` and `.85`. Healthy signs: `imu-hw` is `active (running)`, the socket exists, and `readyz` returns `"ready": true`.
+::: info Placeholder
+TODO: the SSH user for the IMU and camera Pis, and anything the camera Pis need before a run.
+:::
 
-## 3. Start the camera nodes
+If image analysis is also needed, start it on the image analysis machine:
 
-Cameras still follow their normal startup flow:
+::: info Placeholder
+TODO: confirm the image analysis machine and its start command. The old SOP used `ssh username@192.168.1.113`, then `cd camera_sensor_fusion/pi-stream/ && docker compose up -d`, but 192.168.1.113 is now a camera Pi.
+:::
 
-```bash
-ssh admin@192.168.1.80
-cd camera_sensor_fusion/
-docker compose up -d
-```
+## 3. Choose devices and check the run parameters
 
-```bash
-ssh admin@192.168.1.92
-cd camera_sensor_fusion/middleware/
-docker compose up -d
-```
-
-## 4. Deploy the IMU Swarm stack
-
-This is the biggest difference from the older per-device workflow: don't SSH into each IMU Pi and run `docker compose --env-file ... up -d`. Deploy the IMU services once from the Swarm manager instead.
-
-```bash
-ssh <manager-user>@192.168.1.76
-cd /home/user/CS560-Smart-Manufacturing-Data/project
-
-# Load .env into the current shell
-set -a
-source ./.env
-set +a
-
-docker stack deploy --resolve-image never -c swarm.yml imu
-```
-
-`--resolve-image never` skips registry lookups for image digests, useful when the needed image is already present locally. `imu` is the stack name, which is why services appear as `imu_imu_83_joint1` etc. Each service is pinned to its matching Pi via the `node.labels.device_id` placement constraint and gets its device-specific env values from `.env`.
-
-## 5. Verify the Swarm deployment
-
-```bash
-docker service ps imu_imu_83_joint1
-docker service ps imu_imu_84_joint2
-docker service ps imu_imu_85_joint3
-```
-
-Inspect a service's resolved environment if needed:
-
-```bash
-docker service inspect imu_imu_85_joint3 --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}'
-```
-
-Watch logs:
-
-```bash
-docker service logs -f imu_imu_83_joint1
-```
-
-Healthy signs: a running task on the correct node, no socket connection failures in the logs, and the service begins sampling and publishing. If a service won't start, check that the target Pi is online and in the Swarm, its node label matches the placement constraint, `imu-hw` is healthy on that Pi, and the image tag in `.env` is reachable.
-
-## 6. Ensure the dashboard shows listening status
-
-Green listening indicators mean the dashboard's WebSocket feeds are connected. With no session running, the middleware ignores any device data that arrives — nothing is queued or stored, and nothing from before the session is carried into it. Data is only captured between **Start Session** and **Stop Session**. The badge next to the session indicator shows the current capture mode: **Idle**, **Monitoring — not saved**, **Recording**, or **Stopping**.
-
-### Choose which devices to run
+### Devices
 
 The **Devices** panel lists every IMU, camera, and the robot with its current state. Everything is ticked by default. Untick devices to test only part of the system — a whole category with its group box, or single devices. Only the ticked devices are started, shown in the live feeds, and recorded; the session remembers which devices it used. The selection is locked while monitoring or recording.
 
@@ -130,56 +71,57 @@ The status dots, and the **Field Devices** graphics in the left margin on wide s
 
 Devices left out of the current selection are dimmed in the graphics.
 
-### Optional: check the devices with monitor mode first
+### Run parameters
 
-To see that devices are publishing without recording anything, click **Start Monitoring**. This brings the edge devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot panels (message rate plus latest values). Nothing is written to the database. While monitoring, the IMUs stream right away; they don't wait for the robot's PLC. From here you can either click **Start Session** or **Stop Monitoring** to take the devices back down. Starting a session from monitoring restarts the IMU services (only those; the cameras keep running) so they switch to waiting for the PLC. See step 7.
+The **Run Parameters** card (right margin on wide screens, under Devices otherwise) shows the IMU sample rate, whether the IMUs wait for the PLC, and the IMU max run time. Values stay set from the previous run, so check them. See [Run parameters](/operations/run-parameters).
 
-## 7. Start a session from the dashboard
+Pick the **session type** in the dropdown, and tick **Fake Data** if this is a test rather than real data.
 
-Once the dashboard is healthy, the robot operator is ready, and the IMU services are already running in Swarm, click **Start Session**. Because the IMU services are already running, they begin associating data with the session as soon as it starts.
+## 4. (Optional) Monitor first
 
-In a session, the IMUs run in **PLC trigger mode**: they only send data after the robot's PLC pulses `Data_Start`, tare on `IMU_Tare`, and stop sending on `Db_Stop`. Starting a session therefore (re)starts the IMU services, and the Messages box says so. An IMU only notices a `Data_Start` that comes *after* it is running, so wait until the IMUs show as running before starting the robot. Until the robot starts, the IMUs show as not receiving; that's expected.
+To check that devices are publishing without recording anything, click **Start Monitoring**. This brings the selected devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot boxes (message rate plus latest values). Nothing is written to the database. While monitoring, the IMUs stream right away; they don't wait for the robot's PLC.
 
-## 8. Start the robot
+From here, click **Start Session** to record, or **Stop Monitoring** to take the devices back down.
 
-Started manually by the human operator in the downstairs lab — coordinate with them before starting the session and IMU services.
+## 5. Start the session
 
-## 9. Stop the IMU services and end the session
+Click **Start Session**, then **Confirm & Start**. The confirmation lists any run parameters changed from their defaults.
 
-When the robot run is complete, remove the IMU stack:
+In a session, the IMUs run in **PLC trigger mode**: they only send after the robot's PLC pulses `Data_Start`, tare on `IMU_Tare`, and stop sending on `Db_Stop`. Starting a session therefore (re)starts the IMU services (the cameras keep running if you were monitoring), and the Misc box says so. An IMU only notices a `Data_Start` that comes *after* it is running, so **wait until the IMUs show as running before starting the robot**. Until the robot starts, the IMUs show as not receiving; that's expected.
+
+To record without the PLC (for example, no robot run), turn off **Wait for PLC start** in Run Parameters first.
+
+## 6. Start the robot
+
+The robot is started manually by the operator in the downstairs lab. Coordinate with them before starting the session.
+
+## 7. Stop
+
+With PLC auto stop on (the lab default), you don't have to do anything. When the robot finishes, the PLC pulses `Db_Stop` and the session stops itself. The dashboard switches to **Idle** within about 5 s. See [PLC auto stop](/operations/plc-auto-stop).
+
+Otherwise, click **Stop Session**. Either way, the AMS:
+
+1. stops accepting new data
+2. removes the edge devices
+3. waits up to 10 s for the IMU, camera and robot buffers to be written (a warning names any that didn't drain in time)
+4. ends the session
+5. takes a database backup
+
+## 8. Review the data
+
+- [pgAdmin](http://192.168.2.100:5050/browser/); new users see [Getting database access](/data/new-student-access)
+- Each session row records its devices and run parameters; see [Sessions & capture modes](/overview/capture-modes#sessions)
+
+## Quick reference (AMS host)
 
 ```bash
-docker stack rm imu
-```
-
-Then click **Stop Session**. It stops accepting new data first, then waits (up to 10 s) for the IMU, camera, and robot buffers to finish writing before ending the session; a warning names any buffer that didn't drain in time.
-
-If PLC auto stop is on (the default in the lab), you don't have to click it: when the robot finishes, the PLC pulses `Db_Stop` and the session stops itself the same way. The dashboard switches to **Idle** within about 5 s. See [PLC auto stop](./plc-auto-stop).
-
-## 10. Review data
-
-- [Database Browser](http://192.168.2.100:5050/browser/)
-- [Dashboard](http://192.168.2.100/)
-
-## Quick reference
-
-```bash
-# Start middleware
-docker compose up -d
-
-# Deploy IMU Swarm services
-cd /home/user/CS560-Smart-Manufacturing-Data/project
-set -a; source ./.env; set +a
-docker stack deploy --resolve-image never -c swarm.yml imu
-
-# Check / tail IMU services
-docker service ps imu_imu_83_joint1
-docker service logs -f imu_imu_83_joint1
-
-# Stop IMU Swarm services
-docker stack rm imu
+docker compose ps                         # AMS containers
+docker node ls                            # edge Pis in the Swarm
+docker stack services edge                # edge devices running now
+docker service logs edge_imu-106 --since 5m
+curl -s localhost:8000/capture            # idle / monitor / record / stopping
 ```
 
 ::: warning
-This procedure came from an SOP that had a literal SSH password written inline. It's already in this repo's git history — if that password is still in use for `data-team@192.168.1.76`, rotate it.
+An older version of this procedure had a literal SSH password for `data-team` written inline. It's in this repo's git history; if that password is still in use, rotate it.
 :::

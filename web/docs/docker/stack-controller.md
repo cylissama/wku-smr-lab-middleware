@@ -180,7 +180,7 @@ Then, in order:
 **Monitor** (`POST /listen/start`, only allowed from `idle`):
 
 1. `set_capture(MONITOR, devices=filter)` — opens the gate for the selected devices (nothing is stored in this mode) and pushes the state to `tcp_server`.
-2. `deploy_managed_stacks(plan)`.
+2. `deploy_managed_stacks(plan, stack_env(MONITOR))`.
 3. If any deploy fails → back to `idle` and an error is returned.
 
 **Record** (`GET /session/start/...`):
@@ -188,16 +188,18 @@ Then, in order:
 1. Resolve and validate the selection.
 2. `db.create_session(..., devices=filter)` — the selection is saved in `session.devices` (JSONB; `NULL` = every device).
 3. `set_capture(RECORD, session_id, devices=filter)` — the gate opens *before* devices start, so their first messages are stored.
-4. Deploy — **skipped** if we were already monitoring with the same selection (the devices are already up); otherwise `deploy_managed_stacks(plan)`.
+4. Deploy with `stack_env(RECORD)`. This is **skipped** only if we were already monitoring with the same selection **and** the stacks were deployed with the same settings (`deployed_env`). By default the settings differ (the IMUs' PLC trigger is off while monitoring and on for a session), so starting from Monitor redeploys, which restarts only the IMU services.
 5. If a deploy fails → the gate closes and the session is ended (rolled back).
 
 **`deploy_managed_stacks(plan)`** makes one call per managed stack, in parallel:
 
 | Plan entry for the stack | Call to stack-controller |
 |---|---|
-| no plan (`None`) | `POST /stacks/edge/deploy` with no body → whole stack |
-| a list of services | `POST /stacks/edge/deploy` with `{"services": [...]}` |
+| no plan (`None`) | `POST /stacks/edge/deploy` with `{"env": {...}}` → whole stack |
+| a list of services | `POST /stacks/edge/deploy` with `{"services": [...], "env": {...}}` |
 | an **empty** list (e.g. robot-only run) | `POST /stacks/edge/remove` → the whole stack is taken down, since none of it should run |
+
+`env` holds the **per-deploy settings** from `stack_env(mode)`: `IMU_PLC_TRIGGER` (`false` when monitoring; for a session, from the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD`), plus any edge [run parameters](/operations/run-parameters) changed from their `deploy/.env` default (e.g. `IMU_SAMPLE_HZ`).
 
 Every call goes through `stack_controller_request()`: an `aiohttp` request to `http://${STACK_CONTROLLER_HOST}:${STACK_CONTROLLER_PORT}` (defaults `stack-controller:8080`) with header `Authorization: Bearer ${STACK_CONTROLLER_TOKEN}`. It never raises — failures come back as `{"success": false, "error": "..."}` and are logged to the system logger.
 
@@ -237,9 +239,10 @@ stacks:
     env_file: /stacks/.env
     stack_name: edge
     deploy_flags: ["--resolve-image", "never"]
+    env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S]
 ```
 
-The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name` is the Swarm stack namespace (services become `edge_<service>`). `--resolve-image never` makes Swarm use the image tags already present on each Pi instead of contacting a registry. The file is re-read on every request — but it's a single-file bind mount, so if an editor *replaces* the file instead of editing it in place, the container keeps seeing the old copy until `stack-controller` is restarted.
+The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name` is the Swarm stack namespace (services become `edge_<service>`). `--resolve-image never` makes Swarm use the image tags already present on each Pi instead of contacting a registry. `env_overrides` lists the only variables a deploy request may set in its `env`; anything else gets `400`. This keeps `fastapi-app` from changing hostnames, broker addresses or other infrastructure values. The file is re-read on every request — but it's a single-file bind mount, so if an editor *replaces* the file instead of editing it in place, the container keeps seeing the old copy until `stack-controller` is restarted.
 
 ### Authentication
 
@@ -251,6 +254,7 @@ The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name`
 |---|---|
 | `GET /health` | liveness |
 | `GET /stacks/{name}/services` | the device catalog for that stack (see Step 1) |
+| `GET /stacks/{name}/env` | the `env_file` values of the `env_overrides` variables only, which are the defaults shown in the Run Parameters panel |
 | `POST /stacks/{name}/deploy` | deploy the whole stack, or only `{"services": [...]}` |
 | `POST /stacks/{name}/remove` | `docker stack rm <stack_name>` |
 | `GET /stacks/{name}/status` | per-service running/desired counts, rolled up into a state |
@@ -262,7 +266,7 @@ Deploy and remove take a **per-stack lock**: a second deploy/remove for the same
 For `POST /stacks/edge/deploy` with `{"services": ["imu-106", "camera-front"]}`:
 
 1. **Validate** — an empty list → `400` ("remove the stack instead"); a name not in the compose file → `400` listing the unknown names. Nothing is run.
-2. **Build the environment** — `os.environ` overlaid with `deploy/.env`. This matters because `docker stack deploy` interpolates `${VAR}` **from the environment of the process that runs it**, not from a `.env` file beside the compose file.
+2. **Build the environment** — `os.environ` overlaid with `deploy/.env`, then with the request's `env` (after checking it against `env_overrides`). This matters because `docker stack deploy` interpolates `${VAR}` **from the environment of the process that runs it**, not from a `.env` file beside the compose file.
 3. **Write a filtered compose file** — `write_filtered_compose()` loads `swarm-edge-nodes.yml`, keeps only the selected entries under `services:` (top-level `networks`, `volumes`, `x-` keys are kept as-is), and writes it to a temp file such as `/tmp/stack-k2j9.yml` inside the container. `${VAR}` references are written back **unexpanded** — the real deploy does the interpolation, exactly as for the unfiltered file.
 4. **Run the CLI** (`docker_ops.deploy_stack`, 120 s timeout):
    ```bash
@@ -327,7 +331,7 @@ Each device row in the checklist shows one status, in this order of precedence:
 | Shown | Meaning | Source |
 |---|---|---|
 | **receiving · N msg/s** | a message from this device arrived in the last 3 s (`RECEIVING_TIMEOUT`) | `LiveSampler.activity()` in `fastapi-app`; for the robot, the `activity` field of `tcp_server`'s `GET /queue/status` |
-| **running · no data** (amber) | monitoring/recording, the service is up, but nothing is arriving | Swarm says running, sampler says silent |
+| **running · no data** (red) | monitoring/recording, the service is up, but nothing is arriving | Swarm says running, sampler says silent |
 | **running** | Swarm has the desired number of running tasks | `GET /stacks/edge/status` |
 | **starting** | fewer running than desired, nothing failed yet (usually waiting on the healthcheck) | same |
 | **error** | fewer running than desired and a task has failed | same |
