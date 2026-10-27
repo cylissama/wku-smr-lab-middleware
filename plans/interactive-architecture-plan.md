@@ -1,8 +1,8 @@
 # Interactive architecture diagram: plan
 
-Request: `plans/interactive-architecture.md`. Status: **phase 1 built** (2026-10-27, branch `dev/architecture-diagram`); web image built, not yet deployed. Phase 2 next.
+Request: `plans/interactive-architecture.md`. Status: **phases 1 and 2 built** (2026-10-27, branch `dev/architecture-diagram`); web image built, not yet deployed. Phase 3 next.
 
-**Decided:** LikeC4; hosted at `/architecture/`; an invalid model does **not** fail the web image build (it logs an error and the page shows it); phase 5 skipped for now; downstream consumers are placeholders. Still open: `smr.description` labels (phase 2).
+**Decided:** LikeC4; hosted at `/architecture/`; an invalid model does **not** fail the web image build (it logs an error and the page shows it); phase 5 skipped for now; downstream consumers are placeholders. Descriptions live in `smr.description` labels on each service (decided for phase 2).
 
 ## 1. What we're building
 
@@ -108,7 +108,7 @@ There are two different meanings. Both are covered, and they're kept separate:
 | Phase | Delivers | Done when |
 | --- | --- | --- |
 | **1. Model + site** ✅ | `spec.c4`, hand-written landscape/AMS/edge model, static views, build into the web image at `/architecture/` | Site loads on prod; every element has a description and code link; `likec4 validate` clean |
-| **2. Generated inventory + drift test** | `smr.description` labels in `docker-compose.yml`, `docker-compose.local.yml`, `swarm-edge-nodes.yml`; `architecture/sync.py`; `generated/inventory.c4`; `tests/architecture_test.py`; model refactored to `extend` generated elements | Adding a dummy service with a label makes it appear; without regenerating, the test fails |
+| **2. Generated inventory + drift test** ✅ | `smr.description` labels in `docker-compose.yml`, `docker-compose.local.yml`, `swarm-edge-nodes.yml`; `architecture/sync.py`; `generated/inventory.c4`; `tests/architecture_test.py`; model refactored to `extend` generated elements | Adding a dummy service with a label makes it appear; without regenerating, the test fails |
 | **3. Flows + docs** | Dynamic views for the six flows; web-component embeds replace the PNGs; new docs page "Keeping the architecture current" | `structure.md` has no static diagrams left |
 | **4. Freshness** | `reviewed`/`paths`/`repo` metadata on hand-written elements; `sync.py --status`; amber styling + "Needs review" view | Touching `fast_server/plc_listener.py` after its `reviewed` date flags the PLC watcher |
 | 5. (optional) Live overlay | Image revision labels, React embed in the dashboard with live health/version | Separate plan if wanted |
@@ -124,9 +124,21 @@ Phases 1 and 2 could be swapped (generator first, then hand-write around it). I'
 - **Placeholders** (tag `#placeholder`, listed in the "Needs details" view): image analysis machine, digital twin, AI service, camera host service; TODOs in descriptions for the IMU sensor and camera models and NTP clients.
 - `likec4` pulled react/react-dom 19.2.8 → 19.3.1. Lint is unchanged (the 2 `vite.config.js` `no-undef` errors predate this work).
 
+### Phase 2 notes (as built)
+
+- **Labels:** `smr.description` on every service in `docker-compose.yml`, `docker-compose.local.yml` (compose labels) and `deploy/swarm-edge-nodes.yml` (Swarm service labels under `deploy.labels`, next to `smr.category`). Nothing else reads them; stack-controller reads labels by name.
+- **Generator** `architecture/sync.py` (PyYAML) writes two files to `web/architecture/generated/`:
+  - `inventory.c4`: `extend ams { <service> = <kind> … }`, one element per compose service, id = service name. Kind from a small map (`mqtt-broker` broker, `web`/`pgadmin` webapp, `postgres` database, else service). Technology = image or `built from <dockerfile>` plus ports as written (`MQTT_PORT→1883`), not resolved, so output is identical on every machine. Profiles become `#optional`.
+  - `edge-hosts.c4`: deployment group `edgepis` (kind `swarm`) with one host per edge service, named from its placement (hostname from `deploy/.env.example`, or `Pi with label camera=front`), holding a named instance of `edge.imuNode`/`edge.cameraNode` by `smr.category`. An unknown category or a missing label stops the generator with the service named.
+- **Hand-written model** extends the generated elements (`extend ams.fastapi-app { … }`). `extend` can add children, links, metadata and relationships but not titles or descriptions, which is why descriptions live in the labels. Ids changed to the compose names (`ams.fastapi` → `ams.fastapi-app`, `ams.mqtt` → `ams.mqtt-broker`, `ams.stackController` → `ams.stack-controller`, `ams.localPostgres` → `ams.postgres`).
+- **Pi IP addresses** are no longer in the machines view (they aren't in any committed deploy file); the view links to the docs IP table. Camera Pi hostnames likewise come from Swarm node labels, not the repo.
+- **Generated output is `likec4 format`-stable**, so formatting the workspace doesn't break the test.
+- **Test** `tests/architecture_test.py`: generated files match `render()`; every `docker-compose.local.yml` service is described; small helper tests. A scratch-copy check confirmed a new compose service fails the test until regenerated, then appears in the model.
+- **Rollout note:** the compose label change means the next plain `docker compose up -d` recreates every AMS service; do it while nothing is recording.
+
 ## 5. Keeping it current (the workflow)
 
-- **Adding or removing a service:** set `smr.description`, run `python architecture/sync.py`, and commit the regenerated file. The test enforces it.
+- **Adding or removing a service:** set `smr.description`, run `python architecture/sync.py`, and commit the regenerated files. The test enforces it. A new edge `smr.category` also needs a node kind in `model/edge.c4` and `EDGE_NODES` in `sync.py`.
 - **Changing how things talk** (new topic, port, endpoint between services): edit the relationship in `model/*.c4` and bump `reviewed` on the elements you checked.
 - **Preview:** `npm run arch:dev` in `web/`, or the LikeC4 VS Code extension, which previews live as you type.
 - **Before a release:** open the "Needs review" view.
