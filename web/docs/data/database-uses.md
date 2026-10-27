@@ -35,7 +35,7 @@ These return a whole session at once; for analysis, query the database directly 
 | `GET /camera/{label}` | All `image_detection` rows for a session label |
 | `GET /robot/{label}` | All `robot` rows for a session label, in two shapes |
 
-`GET /robot/{label}` is notable: alongside the raw rows, it also returns a `twins` array — one object per row shaped as `{ ts, joints: [...6], tcp: [x,y,z], quat: [w,p,r,1] }` — reshaped specifically for the digital-twin visualization consumers.
+`GET /robot/{label}` is notable: alongside the raw rows, it also returns a `twins` array — one object per row shaped as `{ ts, joints: [...6], tcp: [x,y,z], quat: [w,p,r,1] }` — reshaped specifically for the digital-twin visualization consumers. The digital twin (and the AI service linked from the dashboard header) are work in progress and not finished yet.
 
 ## Backup and restore
 

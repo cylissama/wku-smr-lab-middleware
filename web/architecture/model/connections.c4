@@ -27,7 +27,7 @@ model {
   ams.tcp -[nfs]-> nas.logs 'data log files'
 
   // Downstream
-  downstream.twin -[http]-> ams.fastapi-app 'GET /robot/{label} (TODO: confirm)' {
-    #placeholder
+  downstream.twin -[http]-> ams.fastapi-app 'GET /robot/{label} (WIP)' {
+    #wip
   }
 }

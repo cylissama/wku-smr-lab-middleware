@@ -38,12 +38,14 @@ model {
       link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
 
       camera = device 'Camera' {
+        #placeholder
         technology 'V4L2 /dev/video0'
-        description 'TODO: camera model.'
+        description 'Placeholder: camera model.'
       }
       cameraHost = hostService 'Camera host service' {
         #placeholder
-        description 'TODO: what provides /run/camera-hw on the Pi.'
+        description 'Placeholder: what provides /run/camera-hw on the Pi, how it is installed and run (systemd unit?), and how camera-edge:latest gets onto the Pi.'
+        link /docs/hardware/camera 'Camera nodes'
       }
       cameraEdge = service 'camera_edge' {
         #perRun

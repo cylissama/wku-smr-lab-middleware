@@ -2,6 +2,7 @@
 global {
   styleGroup smr {
     style element.tag = #placeholder { border dashed; opacity 60% }
+    style element.tag = #wip { border dashed; color muted; opacity 70% }
     style element.tag = #optional { border dotted; opacity 50% }
   }
 }
@@ -73,8 +74,8 @@ views {
 
   view placeholders {
     title 'Needs details'
-    description 'Elements still marked #placeholder. Fill in their description, then remove the tag.'
-    include element.tag = #placeholder
+    description 'Elements still marked #placeholder (details unknown) or #wip (not finished yet). Fill in their description, then remove the tag.'
+    include element.tag = #placeholder, element.tag = #wip
     global style smr
   }
 }
