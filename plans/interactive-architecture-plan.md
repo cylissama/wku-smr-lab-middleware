@@ -1,6 +1,6 @@
 # Interactive architecture diagram: plan
 
-Request: `plans/interactive-architecture.md`. Status: **phases 1 and 2 built** (2026-10-27, branch `dev/architecture-diagram`); web image built, not yet deployed. Phase 3 next.
+Request: `plans/interactive-architecture.md`. Status: **phases 1–3 built** (2026-10-27). Phases 1 and 2 merged to `main` (PR #8) and deployed; phase 3 on branch `dev/architecture-flows`, web image built, not yet deployed. Phase 4 next.
 
 **Decided:** LikeC4; hosted at `/architecture/`; an invalid model does **not** fail the web image build (it logs an error and the page shows it); phase 5 skipped for now; downstream consumers are placeholders. Descriptions live in `smr.description` labels on each service (decided for phase 2).
 
@@ -109,7 +109,7 @@ There are two different meanings. Both are covered, and they're kept separate:
 | --- | --- | --- |
 | **1. Model + site** ✅ | `spec.c4`, hand-written landscape/AMS/edge model, static views, build into the web image at `/architecture/` | Site loads on prod; every element has a description and code link; `likec4 validate` clean |
 | **2. Generated inventory + drift test** ✅ | `smr.description` labels in `docker-compose.yml`, `docker-compose.local.yml`, `swarm-edge-nodes.yml`; `architecture/sync.py`; `generated/inventory.c4`; `tests/architecture_test.py`; model refactored to `extend` generated elements | Adding a dummy service with a label makes it appear; without regenerating, the test fails |
-| **3. Flows + docs** | Dynamic views for the six flows; web-component embeds replace the PNGs; new docs page "Keeping the architecture current" | `structure.md` has no static diagrams left |
+| **3. Flows + docs** ✅ | Dynamic views for the six flows; web-component embeds replace the PNGs; new docs page "Keeping the architecture current" | `structure.md` has no static diagrams left |
 | **4. Freshness** | `reviewed`/`paths`/`repo` metadata on hand-written elements; `sync.py --status`; amber styling + "Needs review" view | Touching `fast_server/plc_listener.py` after its `reviewed` date flags the PLC watcher |
 | 5. (optional) Live overlay | Image revision labels, React embed in the dashboard with live health/version | Separate plan if wanted |
 
@@ -136,6 +136,16 @@ Phases 1 and 2 could be swapped (generator first, then hand-write around it). I'
 - **Test** `tests/architecture_test.py`: generated files match `render()`; every `docker-compose.local.yml` service is described; small helper tests. A scratch-copy check confirmed a new compose service fails the test until regenerated, then appears in the model.
 - **Rollout note:** the compose label change means the next plain `docker compose up -d` recreates every AMS service; do it while nothing is recording.
 
+### Phase 3 notes (as built)
+
+- **Flows** in `views/flows.c4`, one dynamic view each: `imuToDb`, `robotToDb`, `startMonitoring`, `startSession`, `plcStop` (PLC pulse or Stop button, `alt`), `liveUpdates`, `healthChecks`, `watchdog` (health and watchdog split in two). Each step is written as the code path (route, env var) it follows. `startMonitoring`, `startSession` and `plcStop` default to `variant sequence`; the site toggles diagram/sequence on every flow.
+- Dynamic steps can't go from a child to its own parent (`dashboard -> web`), and sequence views reject nested actors; steps go straight to the component (`dashboard -> fastapi-app.live`, "proxied by nginx").
+- `imuToDb`, `robotToDb`, `plcStop` use `autoLayout TopBottom` so they're readable in the docs column; left to right they rendered ~110 px tall.
+- The static model now has `ingest -> workers` / `ingest -> live` (the code queues and samples from the MQTT handler), not `capture -> …`.
+- **Embeds:** `docs/.vitepress/theme/ArchitectureView.vue` (registered globally in `theme/index.ts`) loads `/architecture/likec4-views.js` on mount and renders `<likec4-view>` with the docs' light/dark scheme and an optional `variant`; config has `isCustomElement` for `likec4-*`. Under `docs:dev` only the caption link shows. `structure.md` uses `aside: false` for width; the three PNGs and the ASCII deployment sketch are replaced by `imuToDb`, `robotToDb`, `liveUpdates`, `plcStop` (as diagram), `hosts`, `web`.
+- **Docs:** `expanding/architecture.md` ("Keeping the architecture current"), linked from the Expanding sidebar, `expanding/index.md`, `expanding/swarm-nodes.md` and `structure.md`.
+- **User decisions:** digital twin and AI service are work in progress (new tag `#wip`, styled faded/dashed, listed in "Needs details" with the placeholders). The camera host service and camera model are `#placeholder`.
+
 ## 5. Keeping it current (the workflow)
 
 - **Adding or removing a service:** set `smr.description`, run `python architecture/sync.py`, and commit the regenerated files. The test enforces it. A new edge `smr.category` also needs a node kind in `model/edge.c4` and `EDGE_NODES` in `sync.py`.
@@ -159,4 +169,4 @@ Phases 1 and 2 could be swapped (generator first, then hand-write around it). I'
 3. **Where it lives:** `/architecture/` next to the docs (recommended) vs. a tab inside the dashboard.
 4. **Invalid model fails the web image build:** yes (recommended) or warn only.
 5. **Phase 5 live overlay:** skip for now (recommended) or plan it too.
-6. **Downstream consumers** (image analysis machine, digital twin, AI service): who owns them, and should they be on the diagram beyond a placeholder?
+6. **Downstream consumers:** digital twin and AI service are WIP (decided 2026-10-27). Still open: the image analysis machine.
