@@ -1,0 +1,52 @@
+// Which machine runs what. The edge Pis (network "edgepis") are generated
+// into generated/edge-hosts.c4 from deploy/swarm-edge-nodes.yml; the fixed
+// machines are here. Addresses: docs IP table.
+deployment {
+
+  network cell '192.168.1.x' {
+    description 'Robot cell network. The IMU and camera Pis are on it too (bench IMU on 192.168.4.x).'
+
+    host robot 'FANUC controller' {
+      technology '192.168.1.100'
+      instanceOf robotcell.robot
+    }
+    host plc 'Cell PLC' {
+      technology '192.168.1.103'
+      instanceOf robotcell.plc
+    }
+    host nas 'Synology NAS' {
+      technology '192.168.1.104'
+      instanceOf nas
+    }
+  }
+
+  network amsnet '192.168.2.x' {
+    host iiot 'IIoT (AMS host)' {
+      technology '192.168.2.100'
+      instanceOf ams
+    }
+  }
+}
+
+views {
+  deployment view hosts {
+    title 'Machines and networks'
+    description 'Which machine runs what, with the data path only. PLC and Swarm connections are in the other views; addresses in the docs IP table.'
+    link /docs/network/ip-addresses 'IP Address Table'
+    include
+      cell,
+      cell.*,
+      cell.robot.*,
+      cell.plc.*,
+      cell.nas.*,
+      amsnet,
+      amsnet.*,
+      amsnet.iiot.*,
+      edgepis,
+      edgepis.**
+    // Only the data path, which also lays the machines out in layers;
+    // PLC and Swarm-scheduling connections are in the other views
+    exclude * -> * where kind is cip
+    exclude * -> * where kind is docker
+  }
+}

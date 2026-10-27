@@ -17,5 +17,7 @@ stacks:
     # Variables a deploy request may set for that deploy only (layered over
     # env_file). fastapi-app sends IMU_PLC_TRIGGER=false when monitoring and
     # true for a recording session, so monitoring streams right away while a
-    # session waits for the PLC's Data_Start. Any other override is refused.
-    env_overrides: [IMU_PLC_TRIGGER]
+    # session waits for the PLC's Data_Start. The others are the dashboard's
+    # run parameters (fast_server/run_params.py, which also checks their
+    # values). Any other override is refused.
+    env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S]

@@ -199,6 +199,16 @@ async def get_logs(
         raise HTTPException(503, f"Can't read container logs from Docker: {type(e).__name__}: {e}")
 
 
+# The env_file values of the variables a deploy may override (env_overrides),
+# i.e. the defaults behind the dashboard's run parameters. Nothing else from
+# env_file is returned.
+@app.get("/stacks/{name}/env", dependencies=[Depends(verify_token)])
+async def stack_env(name: str) -> dict[str, Any]:
+    cfg = get_stack_config(name)
+    env = load_stack_env(name, cfg)
+    return {"stack": name, "env": {k: env[k] for k in cfg.get("env_overrides") or [] if k in env}}
+
+
 @app.get("/stacks/{name}/services", dependencies=[Depends(verify_token)])
 async def services(name: str) -> dict[str, Any]:
     cfg = get_stack_config(name)

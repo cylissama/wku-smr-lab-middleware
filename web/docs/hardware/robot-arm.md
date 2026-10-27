@@ -4,7 +4,11 @@
 
 A robot arm streams joint angles and TCP (tool center point) pose as CSV lines over a raw TCP connection to the `tcp_server`, rather than over MQTT. Unlike the other devices, the robot is started manually by a human operator in the lab — it is not remotely orchestrated. See [TCP Server](/docker/tcp-server) for how the container on the other end of that connection listens, batches, and stores this data.
 
-# Robot Joint & Pose Data Format
+The controller connects to the AMS at `192.168.2.100:5001` (`ROBOT_TCP_PORT`). The AMS can't start or stop the robot. It only decides what happens to its data: in the dashboard the robot is the device `robot/main`, and its lines are shown and stored only while it's selected and the AMS is monitoring or recording. See [Sessions & capture modes](/overview/capture-modes).
+
+The robot run is coordinated with the [cell PLC](/hardware/plc). When the run ends, the PLC's `Db_Stop` pulse can stop the session automatically ([PLC auto stop](/operations/plc-auto-stop)).
+
+## Robot joint & pose data format
 
 | Field | Type | Description | Example Value |
 |---|---|---|---|

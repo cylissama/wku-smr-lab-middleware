@@ -63,3 +63,162 @@ body {
 .animate-wiggle {
   animation: wiggle 0.5s ease-in-out;
 }
+
+/* Device rail and run parameters tiles (components/DeviceRail.jsx,
+   ParamRail.jsx): each tile sets --tone to its status color; data-tone picks
+   the animation */
+.dev-tile {
+  --tone: #64748b;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  background: #f9fafb;
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, #e5e7eb);
+  border-radius: 0.5rem;
+  transition: border-color 0.4s, opacity 0.4s;
+}
+
+.dev-tile-large {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dev-tile-large .dev-tile-graphic {
+  width: 55%;
+  flex-shrink: 0;
+}
+
+.dev-tile-graphic {
+  color: var(--tone);
+  transition: color 0.4s;
+}
+
+.dev-graphic {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.dev-caption {
+  color: var(--tone);
+}
+
+.dev-led-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--tone);
+  box-shadow: 0 0 6px var(--tone);
+}
+
+.dev-signal {
+  opacity: 0;
+}
+
+.dev-dim {
+  opacity: 0.45;
+}
+
+/* grey: offline, desaturated and still */
+.dev-tile[data-tone="grey"] .dev-tile-graphic {
+  opacity: 0.6;
+}
+
+.dev-tile[data-tone="grey"] .dev-led-dot {
+  box-shadow: none;
+}
+
+/* blue: standby, slow breathing glow */
+.dev-tile[data-tone="blue"] .dev-graphic {
+  animation: dev-breathe 3.2s ease-in-out infinite;
+}
+
+/* red: fault, blinking LED */
+.dev-tile[data-tone="red"] .dev-led,
+.dev-tile[data-tone="red"] .dev-led-dot {
+  animation: dev-blink 1s steps(2, jump-none) infinite;
+}
+
+/* green: sending, glow plus moving data */
+.dev-tile[data-tone="green"] .dev-graphic {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tone) 70%, transparent));
+}
+
+.dev-tile[data-tone="green"] .dev-signal {
+  opacity: 1;
+}
+
+.dev-tile[data-tone="green"] .dev-signal path {
+  animation: dev-emit 1.4s ease-out infinite;
+}
+
+.dev-tile[data-tone="green"] .dev-signal path:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dev-tile[data-tone="green"] .dev-signal path:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.dev-tile[data-tone="green"] .dev-flow {
+  animation: dev-flow 0.8s linear infinite;
+}
+
+.dev-tile[data-tone="green"] .dev-led {
+  animation: dev-blink 0.25s steps(2, jump-none) infinite;
+}
+
+@keyframes dev-breathe {
+  0%, 100% {
+    filter: drop-shadow(0 0 1px color-mix(in srgb, var(--tone) 30%, transparent));
+  }
+
+  50% {
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--tone) 70%, transparent));
+  }
+}
+
+@keyframes dev-blink {
+  0% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes dev-emit {
+  0% {
+    opacity: 0;
+  }
+
+  30% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes dev-flow {
+  to {
+    stroke-dashoffset: -8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dev-tile .dev-graphic,
+  .dev-tile .dev-led,
+  .dev-tile .dev-led-dot,
+  .dev-tile .dev-signal path,
+  .dev-tile .dev-flow {
+    animation: none !important;
+  }
+}

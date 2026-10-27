@@ -4,7 +4,7 @@
 > robot finishes its move. The AMS should watch that tag and, when it turns 1,
 > stop the current session the same way the dashboard's **Stop** button does.
 
-> **Status (2026-10-13):** built on `dev/monitor-mode`, not yet deployed. Decisions:
+> **Status (2026-10-13):** built on `dev/monitor-mode`; deployed and merged to `main` (PR #7). Decisions:
 > `Db_Stop` is a **brief pulse** (not latched); it does **not** end monitor mode;
 > no `stop_source` column (logs/broadcast only). Differences from the draft below:
 > a pulse during a session *start* is **ignored** instead of queued behind it

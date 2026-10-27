@@ -1,0 +1,33 @@
+// How the zones talk to each other. Relationships inside one zone live in
+// that zone's file. Full FQNs are required across files.
+model {
+  // People
+  operator -[http]-> ams.web.dashboard 'uses (port 80)'
+  student -[http]-> ams.pgadmin 'queries (port 5050)'
+
+  // Robot cell
+  robotcell.robot -[tcp]-> ams.tcp 'joint + pose CSV lines (port 5001)'
+  ams.fastapi-app.plcWatcher -[cip]-> robotcell.plc 'reads Db_Stop (port 44818)'
+  edge.imuNode.imuEdge -[cip]-> robotcell.plc 'reads Data_Start, IMU_Tare (port 44818)'
+
+  // Edge -> AMS
+  edge.imuNode.imuEdge -[mqtt]-> ams.mqtt-broker 'publishes imu/<id> (port 1883)'
+  edge.cameraNode.cameraEdge -[mqtt]-> ams.mqtt-broker 'publishes camera/<id>_<name> (port 1883)'
+  ams.docker -[docker]-> edge.imuNode.imuEdge 'schedules (Swarm)'
+  ams.docker -[docker]-> edge.cameraNode.cameraEdge 'schedules (Swarm)'
+
+  // AMS -> NAS
+  ams.fastapi-app.workers -[sql]-> nas.postgres 'batch inserts (asyncpg)'
+  ams.fastapi-app.sessions -[sql]-> nas.postgres 'session rows'
+  ams.tcp -[sql]-> nas.postgres 'robot batch inserts (asyncpg)'
+  ams.pgadmin -[sql]-> nas.postgres 'per-person roles'
+  ams.fastapi-app.backup -[sql]-> nas.postgres 'pg_dump / pg_restore'
+  ams.fastapi-app.backup -[nfs]-> nas.backups 'writes .dump files'
+  ams.fastapi-app -[nfs]-> nas.logs 'data log files'
+  ams.tcp -[nfs]-> nas.logs 'data log files'
+
+  // Downstream
+  downstream.twin -[http]-> ams.fastapi-app 'GET /robot/{label} (TODO: confirm)' {
+    #placeholder
+  }
+}

@@ -33,3 +33,9 @@ pgadmin/generated/
 
 # Lab account logins (real passwords, never commit)
 .accounts
+
+# graphify knowledge graph output (regenerate with /graphify)
+graphify-out/
+
+# Claude Code local settings (personal plugin choices)
+.claude/

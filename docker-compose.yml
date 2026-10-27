@@ -30,6 +30,7 @@ services:
       test: ["CMD", "mosquitto_sub", "-t", "$$SYS/broker/uptime", "-C", "1", "-W", "3"]
       <<: *healthcheck-timing
     labels:
+      smr.description: "MQTT broker. Receives IMU and camera messages from the edge Pis."
       smr.monitor: "true"
       smr.autoheal: "true"
     ports:
@@ -49,6 +50,7 @@ services:
       test: ["CMD", "python", "-m", "fast_server.healthcheck"]
       <<: *healthcheck-timing
     labels:
+      smr.description: "The API behind the dashboard (Python, FastAPI). Owns sessions and the capture mode, ingests MQTT, writes to Postgres in batches, asks stack-controller to deploy the edge, watches the PLC, runs backups."
       smr.monitor: "true"
       smr.autoheal: "true"
     env_file:
@@ -83,6 +85,8 @@ services:
     volumes:
       - nas_backups:/db_backups
       - logs:/fast_server/logs
+      # Run parameters set from the dashboard; local, not NFS, so a save can't hang
+      - fastapi_state:/state
     depends_on:
       - mqtt-broker
       - stack-controller
@@ -95,6 +99,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     labels:
+      smr.description: "Deploys and removes whitelisted Swarm stacks (stacks.yml) with only the selected services. Runs the container watchdog and serves read-only /containers and /logs."
       smr.monitor: "true"
     env_file:
       - .env
@@ -135,6 +140,7 @@ services:
         test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
         <<: *healthcheck-timing
       labels:
+        smr.description: "nginx serving the dashboard, the docs and the architecture site. Proxies /api/ to fastapi-app, and /api/system/containers and /api/system/logs to stack-controller."
         smr.monitor: "true"
         smr.autoheal: "true"
       ports:
@@ -152,6 +158,7 @@ services:
       test: ["CMD", "python", "-m", "fast_server.healthcheck", "http://127.0.0.1:8090/queue/status"]
       <<: *healthcheck-timing
     labels:
+      smr.description: "Robot TCP listener (Python asyncio). Splits the robot stream into CSV lines, applies the capture gate from fastapi-app, batches rows into Postgres. Status server on 8090."
       smr.monitor: "true"
       smr.autoheal: "true"
     env_file:
@@ -184,6 +191,7 @@ services:
     container_name: AMS-ntp
     logging: *default-logging
     labels:
+      smr.description: "NTP server synced from the Google public pool; the lab's shared clock."
       smr.monitor: "true"
       smr.autoheal: "true"
     restart: unless-stopped
@@ -208,6 +216,8 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: AMS-postgres
+    labels:
+      smr.description: "Bundled Postgres, only with the local-db profile, for running away from the NAS. Not used in the lab."
     profiles:
       - local-db
     environment:
@@ -232,6 +242,7 @@ services:
     container_name: AMS-pgadmin
     logging: *default-logging
     labels:
+      smr.description: "pgAdmin with one account per person, each tied to its own Postgres role (lab_viewers or lab_admins)."
       smr.monitor: "true"
       smr.autoheal: "true"
     restart: unless-stopped
@@ -265,6 +276,7 @@ services:
 
 volumes:
   chrony-state:
+  fastapi_state:
   postgres_data:
   pgadmin_data:
   nas_backups:

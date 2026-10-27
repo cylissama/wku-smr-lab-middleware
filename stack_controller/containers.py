@@ -2,7 +2,7 @@
 # the watchdog that restarts unhealthy containers (plain compose only reports
 # "unhealthy", it never acts on it). Only containers labelled smr.monitor=true
 # are visible here, and only smr.autoheal=true ones are ever restarted.
-# See plans/dashboard-decouple-plan.md §D and §G.
+# See plans/completed/dashboard-decouple-plan.md §D and §G.
 
 import asyncio
 import logging

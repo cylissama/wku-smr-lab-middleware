@@ -113,3 +113,12 @@ ANALYZE public.image_detection;
 -- create_session() writes this column.
 ALTER TABLE IF EXISTS public.session
     ADD COLUMN IF NOT EXISTS devices JSONB;
+
+# Oct 22 2026
+-- Run parameters per session (dashboard's Run Parameters panel): every
+-- parameter's value the session was deployed with, defaults included, e.g.
+-- {"IMU_SAMPLE_HZ": 200, "IMU_PLC_TRIGGER_ON_RECORD": true, ...}. NULL for
+-- sessions before this change. Must be applied BEFORE deploying the matching
+-- fastapi-app, whose create_session() writes this column.
+ALTER TABLE IF EXISTS public.session
+    ADD COLUMN IF NOT EXISTS parameters JSONB;

@@ -1,0 +1,84 @@
+// Vocabulary for the SMR Lab architecture model. See plans/interactive-architecture-plan.md.
+specification {
+
+  // --- Elements ---
+  element person {
+    notation 'Person'
+    style { shape person; color green }
+  }
+  // A boundary: a machine or group of machines (AMS host, NAS, edge Pis, robot cell)
+  element zone {
+    notation 'Machine / boundary'
+    style { color slate; opacity 15% }
+  }
+  // A Docker container or Swarm service
+  element service {
+    notation 'Container'
+    style { color primary }
+  }
+  // A part of a service's code
+  element component {
+    notation 'Component (code)'
+    style { color sky }
+  }
+  // A process run on a host outside Docker (systemd unit)
+  element hostService {
+    notation 'Host process (not in Docker)'
+    style { color indigo }
+  }
+  element broker {
+    notation 'Message broker'
+    style { shape queue; color primary }
+  }
+  element webapp {
+    notation 'Web UI'
+    style { shape browser; color primary }
+  }
+  element database {
+    notation 'Database'
+    style { shape storage; color secondary }
+  }
+  element share {
+    notation 'File share'
+    style { shape storage; color muted }
+  }
+  // Physical hardware: robot, PLC, sensors
+  element device {
+    notation 'Hardware'
+    style { color amber }
+  }
+  // Something outside this repo that consumes the data
+  element external {
+    notation 'Downstream consumer'
+    style { color gray; border dashed }
+  }
+
+  // --- Relationship kinds (protocol) ---
+  relationship mqtt { technology 'MQTT'; color primary }
+  relationship http { technology 'HTTP' }
+  relationship sql { technology 'PostgreSQL'; color secondary; line dashed }
+  relationship tcp { technology 'TCP'; color amber }
+  relationship cip { technology 'EtherNet/IP (CIP)'; color amber; line dotted }
+  relationship nfs { technology 'NFS'; color gray; line dashed }
+  relationship docker { technology 'Docker API'; color gray; line dotted }
+  relationship local { technology 'local'; color gray; line dotted }
+
+  // --- Tags ---
+  tag placeholder   // details unknown; fill in (see the element's description)
+  tag perRun        // deployed by the dashboard for each monitor/session run, removed on stop
+  tag optional      // only with a compose profile (e.g. local-db)
+
+  // --- Deployment ---
+  deploymentNode network {
+    notation 'Subnet'
+    style { color slate; opacity 10% }
+  }
+  deploymentNode swarm {
+    notation 'Swarm workers'
+    style { color slate; opacity 10% }
+  }
+  deploymentNode host {
+    notation 'Machine'
+    style { color slate }
+  }
+}

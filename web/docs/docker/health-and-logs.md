@@ -18,7 +18,7 @@ No container waits for another one, the database, the NAS or the MQTT broker bef
 | --- | --- | --- |
 | Question | Can the API reach what it needs? | Is each container up and answering? |
 | Source | `GET /health` on `fastapi-app` | Docker health checks, read by `stack-controller` |
-| Covers | Database, MQTT broker, stack-controller, robot TCP server, log folder, backup folder | Every container labelled `smr.monitor` |
+| Covers | Database, MQTT broker, stack-controller, robot TCP server, log folder, backup folder, and the PLC when [PLC auto stop](/operations/plc-auto-stop) is on | Every container labelled `smr.monitor` |
 | When the API is down | Shows "API unreachable" | Still works (served through nginx → stack-controller) |
 
 ### `GET /health`
@@ -69,7 +69,7 @@ Every service writes its log to stdout as **one JSON record per line**, so `dock
 
 - `level` is the **severity** (Python's numbers: 10 DEBUG, 20 INFO, 30 WARNING, 40 ERROR, 50 CRITICAL).
 - `priority` is reserved for **how urgently a person must act**. It is always `null` today. A future policy goes in `classify()` in `common/log_schema.py`; the `/logs` endpoint already accepts `min_priority`, and the dashboard shows a priority badge as soon as one is set.
-- `category` is one of `health`, `session`, `ingest`, `backup`, `deploy`, `watchdog`, `system`, `other`.
+- `category` is one of `health`, `session`, `ingest`, `backup`, `deploy`, `watchdog`, `system`, `parameters`, `other`.
 - `important: true` puts the record in the dashboard's **Important** tab (which also shows anything at WARNING or worse).
 
 ### Writing logs from code

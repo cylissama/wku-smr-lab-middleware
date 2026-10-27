@@ -12,7 +12,10 @@
     "manifest:info": "node scripts/generate-info-manifest.mjs",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "arch:dev": "likec4 start architecture",
+    "arch:check": "likec4 validate architecture",
+    "arch:build": "likec4 build --no-use-dot --base /architecture/ --title 'SMR Architecture' -o arch-dist architecture"
   },
   "dependencies": {
     "react": "^19.1.1",
@@ -30,6 +33,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.22",
     "globals": "^16.4.0",
+    "likec4": "1.60.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.16",
     "vite": "^7.1.7",

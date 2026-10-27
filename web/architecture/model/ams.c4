@@ -1,0 +1,123 @@
+// The always-on broker stack on the AMS host (docker-compose.yml).
+model {
+
+  ams = zone 'AMS host "IIoT"' {
+    description 'Mini PC at 192.168.2.100. Runs docker-compose.yml (always on) and is the Docker Swarm manager for the edge Pis.'
+    link /docs/hardware/data-broker-mini-pc 'AMS host'
+    link /docs/docker/compose 'Compose'
+    docker = hostService 'Docker engine' {
+      technology 'Docker, Swarm manager'
+      description 'The host Docker daemon. Runs the compose stack and, as Swarm manager, schedules the edge stack onto the Pis.'
+      link /docs/docker/swarm 'Swarm'
+    }
+  }
+
+  // The compose services themselves (title, image, ports, description) are
+  // generated into generated/inventory.c4 from docker-compose.yml; these add
+  // their code links, internals and connections.
+
+  extend ams.mqtt-broker {
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/mqtt_conf/mosquitto.conf 'mosquitto.conf'
+  }
+
+  extend ams.fastapi-app {
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/main.py 'fast_server/main.py'
+    link /docs/docker/api 'API reference'
+
+    ingest = component 'MQTT ingest' {
+      description 'Subscribes to imu/# and camera/#, parses each payload into a row.'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/parsing.py 'parsing.py'
+    }
+    capture = component 'Capture gate' {
+      description 'CaptureState IDLE / MONITOR / RECORD / STOPPING plus the device selection. Only RECORD queues data for the database. Pushed to tcp on every change.'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/capture.py 'capture.py'
+      link /docs/overview/capture-modes 'Capture modes & sessions'
+    }
+    sessions = component 'Sessions & deploys' {
+      description 'Start/stop monitoring and sessions under session_lock. Turns the device selection into per-stack service lists and the run parameters into each deploy env.'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/run_params.py 'run_params.py'
+      link /docs/operations/run-parameters 'Run parameters'
+    }
+    workers = component 'Batch workers' {
+      description 'imu_worker / camera_worker: flush queued rows every BATCHES rows or B_TIMEOUT seconds; drop rows from an ended session.'
+    }
+    live = component 'Live channels' {
+      description 'LiveSampler (one sample per device per LIVE_SAMPLE_INTERVAL) and the /ws/camera, /ws/imu, /ws/robot, /ws/misc WebSocket managers. POST /send/{channel} lets other services broadcast.'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/connection_manager.py 'connection_manager.py'
+    }
+    plcWatcher = component 'PLC watcher' {
+      description 'PLCSignalWatcher polls Db_Stop with pycomm3 in a thread; each rising edge stops a RECORD session (PLC_AUTO_STOP).'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/plc_listener.py 'plc_listener.py'
+    }
+    health = component 'Health & supervisors' {
+      description 'Connects to the DB and MQTT in the background with backoff; GET /health for db, mqtt, stack_controller, tcp, logs, backups, plc.'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/health.py 'health.py'
+      link /docs/docker/health-and-logs 'Health & logs'
+    }
+    backup = component 'Backups' {
+      description 'pg_dump on every session stop and on demand; pg_restore drops and recreates the database.'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/db/database.py 'db/database.py'
+    }
+  }
+
+  ams.fastapi-app.ingest -> ams.fastapi-app.capture 'asks whether to queue'
+  ams.fastapi-app.capture -> ams.fastapi-app.workers 'queues rows (RECORD only)'
+  ams.fastapi-app.capture -> ams.fastapi-app.live 'live samples (MONITOR, RECORD)'
+  ams.fastapi-app.sessions -> ams.fastapi-app.capture 'sets mode and selection'
+  ams.fastapi-app.plcWatcher -> ams.fastapi-app.sessions 'Db_Stop pulse stops the session'
+  ams.fastapi-app.sessions -> ams.fastapi-app.backup 'backup on stop'
+
+  extend ams.tcp {
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/tcp_server/tcp_server.py 'tcp_server.py'
+    link /docs/docker/tcp-server 'TCP server'
+  }
+
+  extend ams.stack-controller {
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/stack_controller/main.py 'stack_controller/main.py'
+    link /docs/docker/stack-controller 'Stack controller & device selection'
+  }
+
+  extend ams.web {
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/web/nginx.conf 'nginx.conf'
+
+    dashboard = component 'Dashboard SPA' {
+      technology 'React, Vite'
+      description 'Sessions, device selection, run parameters, live message boxes, backups, container health and logs.'
+      link /docs/overview/dashboard 'The dashboard'
+    }
+    docs = component 'Docs site' {
+      technology 'VitePress'
+      description 'This documentation, served under /docs/.'
+      link /docs/ 'Docs'
+    }
+    architecture = component 'Architecture site' {
+      technology 'LikeC4'
+      description 'This site, built from web/architecture/ and served under /architecture/.'
+      link https://github.com/cylissama/wku-smr-lab-middleware/tree/main/web/architecture 'web/architecture/'
+    }
+  }
+
+  extend ams.ntp {
+    link /docs/docker/automations#time-synchronization 'Time synchronization'
+  }
+
+  extend ams.pgadmin {
+    link /docs/data/accessing-database 'Accessing the database'
+  }
+
+  extend ams.postgres {
+    link /docs/docker/compose 'Compose'
+  }
+
+  // Inside the AMS host
+  ams.mqtt-broker -[mqtt]-> ams.fastapi-app.ingest 'imu/#, camera/#'
+  ams.web -[http]-> ams.fastapi-app '/api/ proxy, /ws/* WebSockets'
+  ams.web -[http]-> ams.stack-controller '/api/system/containers, /api/system/logs'
+  ams.fastapi-app.sessions -[http]-> ams.stack-controller 'deploy / remove edge stack, list services, read env defaults'
+  ams.fastapi-app.health -[http]-> ams.stack-controller 'health check'
+  ams.fastapi-app.capture -[http]-> ams.tcp 'PUT /capture (mode + selection)'
+  ams.fastapi-app.health -[http]-> ams.tcp 'GET /queue/status'
+  ams.tcp -[http]-> ams.fastapi-app.capture 'GET /capture every 5 s'
+  ams.tcp -[http]-> ams.fastapi-app.live 'POST /send/robot (live lines, status)'
+  ams.stack-controller -[docker]-> ams.docker 'stack deploy / rm, container state, logs, restarts'
+}

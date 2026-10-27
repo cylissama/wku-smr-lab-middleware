@@ -1,78 +1,33 @@
 # Bringing a node online
 
-This covers the full Raspberry Pi host setup for an IMU node and the Swarm steps needed to add it to the cluster. See [Hardware](/hardware/) for why IMU nodes are split into two cooperating processes, and [Docker &gt; Swarm](/docker/swarm) for the Swarm service definitions this node setup feeds into.
+How to add a Raspberry Pi to the edge stack, from a bare Pi to a device you can tick on the dashboard. See [IMU nodes](/hardware/imu) for why an IMU Pi runs two processes, and [Swarm](/docker/swarm) for the stack this feeds into.
 
-The IMU architecture has two parts:
+An IMU node has two parts:
 
-1. A Pi-local hardware service started with `python -m imu_host` — this is what actually has permission to open the I2C bus.
-2. A containerized edge service (`imu_edge`), deployed via Swarm, that talks to the host service over the Unix socket at `/run/imu-hw/imu.sock`.
+1. **`imu_host`**, a Pi-local hardware service (systemd unit `imu-hw`), the only thing that opens the I2C bus. It listens on `/run/imu-hw/imu.sock`.
+2. **`imu_edge`**, the container the edge stack runs (image `smart-mfg-imu:latest`), which talks to `imu_host` over that socket.
 
-The host service must be working before the Docker container can use the IMU.
-
-## Active IMU nodes
-
-| IMU | Host IP | Swarm Service | Session ID | CSV Output |
-| --- | --- | --- | --- | --- |
-| IMU 83 | `192.168.1.83` | `imu_83_joint1` | `imu-node-83` | `/app/data/imu-83-joint1.csv` |
-| IMU 84 | `192.168.1.84` | `imu_84_joint1` | `imu-node-84` | `/app/data/imu-84-joint1.csv` |
-| IMU 85 | `192.168.1.85` | `imu_85_joint1` | `imu-node-85` | `/app/data/imu-85-joint1.csv` |
-| IMU 86 | `192.168.1.86` | `imu_86_joint1` | `imu-node-86` | `/app/data/imu-86-joint1.csv` |
-
-IMU 83 is the working reference node; 84, 85, and 86 should be brought online the same way.
+The host service must work before the container can use the IMU.
 
 ## 1. Prepare the Pi
 
-The physical node is assumed to already be a Raspberry Pi connected to the SMR lab network. Clone or copy the [`imu_node_smr`](/overview/repositories) repo onto it and move into the project directory:
+The Pi should be on the lab network with a fixed address (see the [IP Address Table](/network/ip-addresses)) and a **unique hostname**, because the stack pins each IMU service by hostname. Existing IMU Pis are `RPIIMUJ1` … `RPIIMUJ5`.
+
+Put the [IMU edge repo](https://github.com/cylissama/wku-smr-lab-imu-edge-node) at `/opt/smart-mfg-imu` (the stack mounts `/opt/smart-mfg-imu/data`), and create a virtual environment:
 
 ```bash
-cd /home/admin/imu_node_smr
-```
-
-Create and activate a virtual environment if needed:
-
-```bash
+cd /opt/smart-mfg-imu
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install Docker if it isn't already present:
+::: info Placeholder
+TODO: which branch the Pis run (`plc_update` has the PLC trigger), and who owns `/opt/smart-mfg-imu` on the Pi.
+:::
 
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker admin
-newgrp docker
-docker version
-```
+## 2. Set up the hardware service
 
-Join the Pi to the Swarm as a worker, using the worker token from the manager:
-
-```bash
-docker swarm join-token worker
-docker swarm join --token <worker-token> 192.168.1.76:2377
-```
-
-From the manager, confirm the node appears:
-
-```bash
-docker node ls
-```
-
-Then label the node so Swarm's placement constraints can pin the correct IMU service to the correct host:
-
-```bash
-docker node update --label-add device_id=192.168.1.83 <node-name-for-83>
-docker node update --label-add device_id=192.168.1.84 <node-name-for-84>
-docker node update --label-add device_id=192.168.1.85 <node-name-for-85>
-docker node update --label-add device_id=192.168.1.86 <node-name-for-86>
-```
-
-Check the labels after updating:
-
-```bash
-docker node inspect <node-name> --format '{{ .Spec.Labels }}'
-```
-
-## 2. Install host dependencies
+### Install host dependencies
 
 ```bash
 python3 -m pip install -r requirements-host.txt
@@ -80,7 +35,7 @@ python3 -m pip install -r requirements-host.txt
 
 The host requirements include `Adafruit-Blinka`, `adafruit-circuitpython-bno08x`, `numpy`, and `lgpio`. If `board` import errors mention `lgpio` specifically, reinstalling the same requirements file usually resolves it.
 
-## 3. Start the hardware service manually
+### Start the hardware service manually
 
 The host service creates and listens on the Unix socket at `/run/imu-hw/imu.sock`. For a first manual test:
 
@@ -94,7 +49,7 @@ If `sudo` reports `unable to resolve host <hostname>: Name or service not known`
 
 Expected startup output includes `IMU connection successfully initialized`. Leave this process running while testing.
 
-## 4. Verify the host service
+### Verify the host service
 
 In a second terminal on the Pi, confirm the socket exists:
 
@@ -111,9 +66,9 @@ curl --unix-socket /run/imu-hw/imu.sock http://localhost/v1/status
 
 When the service is healthy, `readyz` should report `"ready": true`.
 
-## 5. Install the host service with systemd
+### Install the host service with systemd
 
-After manual testing succeeds, install the Pi-local service so it starts automatically. The template unit file lives at `deploy/systemd/imu-hw.service` in the `imu_node_smr` repo. Before installing it on a given Pi, make sure `User`, `Group`, `WorkingDirectory`, and `ExecStart` match that machine. For a repo at `/home/admin/imu_node_smr`:
+After manual testing succeeds, install the Pi-local service so it starts automatically. The unit file is `deploy/systemd/imu-hw.service` in the edge repo. Make sure `User`, `Group`, `WorkingDirectory` and `ExecStart` match the Pi. For the repo at `/opt/smart-mfg-imu`:
 
 ```ini
 [Unit]
@@ -125,9 +80,9 @@ Type=simple
 User=admin
 Group=admin
 SupplementaryGroups=i2c gpio
-WorkingDirectory=/home/admin/imu_node_smr
+WorkingDirectory=/opt/smart-mfg-imu
 Environment=IMU_SOCKET_PATH=/run/imu-hw/imu.sock
-ExecStart=/home/admin/imu_node_smr/.venv/bin/python -m imu_host
+ExecStart=/opt/smart-mfg-imu/.venv/bin/python -m imu_host
 Restart=always
 RestartSec=3
 RuntimeDirectory=imu-hw
@@ -137,7 +92,7 @@ RuntimeDirectoryMode=0755
 WantedBy=multi-user.target
 ```
 
-Install and start it (from the `imu_node_smr` directory):
+Install and start it (from `/opt/smart-mfg-imu`):
 
 ```bash
 sudo cp deploy/systemd/imu-hw.service /etc/systemd/system/imu-hw.service
@@ -153,70 +108,77 @@ ls -l /run/imu-hw/imu.sock
 curl --unix-socket /run/imu-hw/imu.sock http://localhost/v1/readyz
 ```
 
-Repeat sections 1 through 5 on every IMU Pi before deploying the full Swarm stack.
 
-## 6. Start the container layer from the manager
-
-Once the host service is ready, the Docker container can connect through the socket mount. The container needs `/run/imu-hw:/run/imu-hw` mounted, `IMU_SOCKET_PATH=/run/imu-hw/imu.sock` set, MQTT settings provided, and runs `python3 -m imu_edge`.
-
-From the Swarm manager, load the repo `.env` and deploy:
+## 3. Install Docker and the image
 
 ```bash
-set -a
-source ./.env
-set +a
-docker stack deploy --resolve-image never -c swarm.yml imu
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker admin
+newgrp docker
+docker version
 ```
 
-Check each IMU service after deployment:
+The stack deploys with `--resolve-image never`, so `smart-mfg-imu:latest` must exist on the Pi itself.
+
+::: info Placeholder
+TODO: the command used to build or load `smart-mfg-imu:latest` on a Pi (for example `docker build -t smart-mfg-imu:latest .` in `/opt/smart-mfg-imu`, if that's how it's done).
+:::
+
+## 4. Join the Swarm
+
+On the AMS host (the manager), get the worker token:
 
 ```bash
-docker service ps imu_imu_83_joint1
-docker service ps imu_imu_84_joint1
-docker service ps imu_imu_85_joint1
-docker service ps imu_imu_86_joint1
+docker swarm join-token worker
 ```
 
-Tail logs for any node that isn't starting cleanly:
+On the Pi:
 
 ```bash
-docker service logs -f imu_imu_83_joint1
+docker swarm join --token <worker-token> 192.168.2.100:2377
 ```
 
-If a task stays in `Rejected`, `Pending`, or `Starting`, verify: the Pi joined the Swarm, the node label matches the service placement constraint exactly, the `imu-hw` systemd service is healthy on that Pi, and the image tag in `.env` exists locally or is reachable from that node.
-
-## 7. Bring up a new IMU node end-to-end
-
-Checklist for `192.168.1.84`, `192.168.1.85`, and `192.168.1.86`:
-
-1. Copy or clone the repo to `/home/admin/imu_node_smr`.
-2. Create `.venv` and install `requirements-host.txt`.
-3. Install Docker if it isn't already present.
-4. Join the Pi to the Swarm as a worker.
-5. Label the Swarm node from the manager with `device_id=<node-ip>`.
-6. Start `python3 -m imu_host` manually and confirm `/v1/readyz` is healthy.
-7. Install and enable the `imu-hw` systemd service.
-8. Deploy or refresh the stack from the manager with `docker stack deploy --resolve-image never -c swarm.yml imu`.
-9. Confirm `docker service ps` schedules the correct service to the correct node.
-10. Watch `docker service logs -f` until the container begins sampling and publishing.
-
-## 8. Stopping the system
-
-Tear down the Swarm deployment:
+Back on the AMS host, check that the Pi is `Ready`:
 
 ```bash
-docker stack rm imu
+docker node ls
 ```
 
-Stop the Pi-local hardware service — `Ctrl+C` if running manually, or `sudo systemctl stop imu-hw` if running under systemd.
+IMUs need no node label; they're placed by hostname. Cameras are placed by label:
+
+```bash
+docker node update --label-add camera=front <node-name>   # or camera=side
+```
+
+## 5. Add the device to the edge stack
+
+On the AMS host, in `/home/ubuntu/wku-smr-lab-middleware`:
+
+1. In `deploy/swarm-edge-nodes.yml`, copy an existing `imu-1xx` service block and change every `IMU_1xx_` variable to the new id. Keep the `smr.category` / `smr.device` labels; they put the device on the dashboard.
+2. Add `IMU_<id>_DEVICE_ID` and `IMU_<id>_HOSTNAME` to `deploy/.env`, and to `deploy/.env.example` (with the real hostname, no secrets).
+3. Reload the dashboard. The new device shows up in the Devices box; no restart is needed because stack-controller reads both files on each request.
+
+## 6. Test it
+
+1. On the dashboard, tick only the new device and click **Start Monitoring**.
+2. It should go *starting* → *running* → *receiving · ~100 msg/s* within about 30 s.
+3. If it stays at *starting*, check on the AMS host:
+
+   ```bash
+   docker service ps edge_imu-<id> --no-trunc
+   docker service logs edge_imu-<id> --since 5m
+   ```
+
+4. Click **Stop Monitoring**.
+
+## Adding a camera node
+
+The same Swarm steps apply (join, label `camera=<name>`, add a service block like `camera-front`, add the `CAMERA_<NAME>_*` variables to `deploy/.env`). The device key is `camera/<device_id>_<name>`.
+
+::: info Placeholder
+TODO: camera Pi host setup: what provides `/run/camera-hw`, the calibration file, and how `camera-edge:latest` gets onto the Pi.
+:::
 
 ## Troubleshooting
 
-| Symptom | Likely cause / fix |
-| --- | --- |
-| `This node is not a swarm worker` | Rejoin with a current worker token: `docker swarm join --token <worker-token> 192.168.1.76:2377` |
-| `no suitable node (scheduling constraints not satisfied on N nodes)` | Node label doesn't match the placement constraint. Compare `docker node inspect <node-name> --format`, Go-template `.Spec.Labels`, against the `node.labels.device_id == ...` line in `swarm.yml`. |
-| `ModuleNotFoundError: No module named 'lgpio'` | Reinstall host requirements: `python3 -m pip install -r requirements-host.txt` |
-| `PermissionError: [Errno 13] Permission denied: '/run/imu-hw'` | Create the runtime directory manually for a manual test run, or run via systemd — `RuntimeDirectory=imu-hw` creates it automatically. |
-| `No such image` | Make sure `IMU_EDGE_IMAGE` matches an image that actually exists on the target node. |
-| `Could not establish MQTT connection` | Check `MQTT_BROKER_IP`, `MQTT_BROKER_PORT`, and network reachability from the container. |
+See [Swarm troubleshooting](/docker/swarm#troubleshooting) and [Stack controller troubleshooting](/docker/stack-controller#troubleshooting).

@@ -4,6 +4,8 @@ import StatusIndicator from "./components/StatusIndicator";
 import BackupCard from "./components/BackupCard";
 import DashboardPanel from "./components/DashboardPanel";
 import DeviceSelector from "./components/DeviceSelector";
+import DeviceRail from "./components/DeviceRail";
+import ParamRail from "./components/ParamRail";
 import ContainerHealth from "./components/ContainerHealth";
 import LogsPanel from "./components/LogsPanel";
 import { HealthDetails, HealthStrip } from "./components/SystemHealth";
@@ -19,6 +21,7 @@ import {
 } from "./api/sessionApi";
 import { sendDashboardMessage } from "./api/messageApi";
 import { getCapture, getDevices, startListening, stopListening } from "./api/captureApi";
+import { getParameters, saveParameters } from "./api/paramsApi";
 
 const ROBOT_CAMERA_URL = import.meta.env.VITE_ROBOT_CAMERA_URL;
 const DB_GUI_URL = import.meta.env.VITE_DB_GUI_URL;
@@ -98,6 +101,10 @@ export default function DataDashboard() {
     const [devicesError, setDevicesError] = useState("");
     const [isDevicesLoading, setIsDevicesLoading] = useState(true);
     const hasInitialDeviceSelection = useRef(false);
+    // Run parameters (GET /parameters), shown in the right-hand panel
+    const [runParams, setRunParams] = useState(null);
+    const [runParamsEditable, setRunParamsEditable] = useState(false);
+    const [runParamsError, setRunParamsError] = useState("");
 
     // fastapi-app's dependency report; session actions need the database
     const systemHealth = useSystemHealth(5000);
@@ -238,6 +245,30 @@ export default function DataDashboard() {
 
         return () => clearInterval(intervalId);
     }, [captureMode]);
+
+    const loadRunParams = useCallback(async () => {
+        try {
+            const json = await getParameters();
+            setRunParams(json.data ?? []);
+            setRunParamsEditable(Boolean(json.editable));
+            setRunParamsError("");
+        } catch (e) {
+            setRunParamsError(`Unable to load run parameters: ${getErrorMessage(e)}`);
+        }
+    }, []);
+
+    // Reloaded on every capture mode change, since that's what locks/unlocks them
+    useEffect(() => {
+        loadRunParams();
+    }, [captureMode, loadRunParams]);
+
+    const saveRunParams = async (values) => {
+        const data = await saveParameters(values);
+        await loadRunParams();
+        return data;
+    };
+
+    const changedRunParams = (runParams ?? []).filter((param) => param.overridden);
 
     useEffect(() => {
         if (!dbUp) {
@@ -404,7 +435,21 @@ export default function DataDashboard() {
         (isMonitoring || (captureMode === "idle" && !activeSession && hasDeviceSelection));
 
     return (
-        <div className="min-h-screen bg-gray-100 text-gray-900">
+        // Wide screens get a 3-column grid: the device rail fills the left
+        // gutter, run parameters the right, and the main column stays centered
+        // at its usual width
+        <div className="min-h-screen bg-gray-100 text-gray-900 min-[1840px]:grid min-[1840px]:grid-cols-[1fr_minmax(0,80rem)_1fr]">
+            <div className="hidden justify-self-end pt-20 min-[1840px]:block">
+                <div className="sticky top-14 max-h-[calc(100vh-4.5rem)] w-64 overflow-y-auto">
+                    <DeviceRail
+                        devices={devices}
+                        selected={shownSelection}
+                        listening={captureMode === "monitor" || captureMode === "record"}
+                        captureMode={captureMode}
+                    />
+                </div>
+            </div>
+
             <div className="mx-auto w-full max-w-7xl px-4 pb-8 pt-20 sm:px-6 lg:px-8">
                 <div className="sticky top-14 z-30 mb-6 rounded-xl border border-gray-200 bg-white/95 shadow-sm backdrop-blur">
                     <div className="flex flex-col gap-4 p-4 lg:p-5">
@@ -496,6 +541,18 @@ export default function DataDashboard() {
                                     {isConfirmingSession && (
                                         <p className="absolute left-0 top-full z-10 mt-1 w-48 text-xs font-medium text-gray-600">
                                             Full test session? "Fake Data" Un-checked or just testing components? "Fake Data" Checked
+                                            {changedRunParams.length > 0 && (
+                                                <span className="mt-1 block text-cyan-800">
+                                                    Changed run parameters:{" "}
+                                                    {changedRunParams
+                                                        .map((p) =>
+                                                            p.type === "bool"
+                                                                ? `${p.label} ${p.value ? "on" : "off"}`
+                                                                : `${p.label} ${p.value}${p.unit ? ` ${p.unit}` : ""}`
+                                                        )
+                                                        .join(", ")}
+                                                </span>
+                                            )}
                                         </p>
                                     )}
                                 </div>
@@ -582,6 +639,17 @@ export default function DataDashboard() {
                     />
                 </div>
 
+                {/* Narrow screens: no right gutter, so the panel sits here */}
+                <div className="mb-6 min-[1840px]:hidden">
+                    <ParamRail
+                        params={runParams}
+                        editable={runParamsEditable}
+                        captureMode={captureMode}
+                        loadError={runParamsError}
+                        onSave={saveRunParams}
+                    />
+                </div>
+
                 {/* While the API is unreachable the System Health card already says so */}
                 {dashboardError && !systemHealth.apiError && (
                     <div className="mb-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 shadow-sm">
@@ -620,6 +688,18 @@ export default function DataDashboard() {
                     <DashboardPanel className="xl:col-span-3">
                         <LogsPanel focusSource={logsFocus} onFocusHandled={clearLogsFocus} />
                     </DashboardPanel>
+                </div>
+            </div>
+
+            <div className="hidden justify-self-start pt-20 min-[1840px]:block">
+                <div className="sticky top-14 max-h-[calc(100vh-4.5rem)] w-64 overflow-y-auto">
+                    <ParamRail
+                        params={runParams}
+                        editable={runParamsEditable}
+                        captureMode={captureMode}
+                        loadError={runParamsError}
+                        onSave={saveRunParams}
+                    />
                 </div>
             </div>
         </div>

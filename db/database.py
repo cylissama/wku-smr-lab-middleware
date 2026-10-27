@@ -752,7 +752,8 @@ class DatabaseSingleton:
 
     # Call to create a new session in DB & update current session
     # devices: selected device keys, or None for every device (stored as NULL)
-    async def create_session(self, label, session_label_name, is_test_session=True, devices=None):
+    # parameters: the run parameters this session was deployed with (fast_server/run_params.py)
+    async def create_session(self, label, session_label_name, is_test_session=True, devices=None, parameters=None):
 
         session_id = await self.get_latest_session()
 
@@ -766,11 +767,12 @@ class DatabaseSingleton:
 
             session_id = await conn.fetchval(
                 """
-                INSERT INTO session (label, started_at, is_test_session, session_label_id, devices)
-                VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id
+                INSERT INTO session (label, started_at, is_test_session, session_label_id, devices, parameters)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb) RETURNING id
                 """,
                 label, self.get_time(), is_test_session, session_label_id,
-                json.dumps(sorted(devices)) if devices is not None else None
+                json.dumps(sorted(devices)) if devices is not None else None,
+                json.dumps(parameters) if parameters is not None else None
             )
 
         self.current_session_id = session_id

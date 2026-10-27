@@ -150,6 +150,15 @@ class StackControllerTests(unittest.TestCase):
         [call] = self.deployed
         self.assertEqual(call["env"]["IMU_PLC_TRIGGER"], "false")
 
+    def test_env_returns_only_overridable_values(self):
+        resp = self.client.get("/stacks/edge/env", headers=self.headers)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["env"], {"IMU_PLC_TRIGGER": "false"})   # not IMU_106_DEVICE_ID
+
+    def test_env_requires_token(self):
+        self.assertEqual(self.client.get("/stacks/edge/env").status_code, 401)
+
     def test_deploy_refuses_unlisted_env_override(self):
         resp = self.client.post("/stacks/edge/deploy", headers=self.headers,
                                 json={"env": {"MQTT_BROKER_IP": "10.0.0.1"}})

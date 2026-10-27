@@ -16,6 +16,9 @@ export default defineConfig({
       { text: 'Network', link: '/network/topology' },
       { text: 'Expanding', link: '/expanding/' },
       { text: 'Operations', link: '/operations/running-a-test' },
+      // Not a docs page: the LikeC4 site built from web/architecture/. VitePress
+      // prefixes base (/docs/) onto nav links, so climb out of it: /docs/../architecture/
+      { text: 'Architecture', link: '/../architecture/', target: '_self' },
     ],
 
     sidebar: [
@@ -24,6 +27,8 @@ export default defineConfig({
         items: [
           { text: 'What is this project?', link: '/overview/what-is-this' },
           { text: 'How is this structured?', link: '/overview/structure' },
+          { text: 'Capture modes & sessions', link: '/overview/capture-modes' },
+          { text: 'The dashboard', link: '/overview/dashboard' },
           { text: 'Github Repos', link: '/overview/repositories' },
         ],
       },
@@ -35,6 +40,7 @@ export default defineConfig({
           { text: 'IMU Nodes', link: '/hardware/imu' },
           { text: 'Camera Nodes', link: '/hardware/camera' },
           { text: 'Robot Arm', link: '/hardware/robot-arm' },
+          { text: 'Cell PLC', link: '/hardware/plc' },
         ],
       },
       {
@@ -51,6 +57,7 @@ export default defineConfig({
         text: 'Docker',
         items: [
           { text: 'Compose', link: '/docker/compose' },
+          { text: 'API reference', link: '/docker/api' },
           { text: 'Swarm', link: '/docker/swarm' },
           { text: 'Stack controller & device selection', link: '/docker/stack-controller' },
           { text: 'Health & logs', link: '/docker/health-and-logs' },
@@ -80,6 +87,7 @@ export default defineConfig({
           { text: 'Running a test session', link: '/operations/running-a-test' },
           { text: 'Troubleshooting', link: '/operations/troubleshooting' },
           { text: 'PLC auto stop', link: '/operations/plc-auto-stop' },
+          { text: 'Run parameters', link: '/operations/run-parameters' },
           { text: 'Camera live feed', link: '/operations/camera-ops' },
         ],
       },

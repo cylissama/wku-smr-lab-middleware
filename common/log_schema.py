@@ -1,5 +1,5 @@
 # The one log record shape shared by every AMS service (see
-# plans/dashboard-decouple-plan.md §G). Services write these to stdout as one
+# plans/completed/dashboard-decouple-plan.md §G). Services write these to stdout as one
 # JSON object per line, so `docker logs` is both human-readable and parseable by
 # stack-controller's /logs reader.
 #
@@ -15,7 +15,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
-CATEGORIES = ("health", "session", "ingest", "backup", "deploy", "watchdog", "system", "other")
+CATEGORIES = ("health", "session", "ingest", "backup", "deploy", "watchdog", "system", "parameters", "other")
 
 # Which service wrote the record -- compose sets SERVICE_NAME per container
 SOURCE = os.getenv("SERVICE_NAME") or socket.gethostname()

@@ -1,5 +1,9 @@
 # Compose vs. Swarm network parity
 
+::: warning Historical
+This reviews an April 2026 plan to run the whole AMS under Swarm (`swarm.yml`). That plan wasn't adopted. Today the AMS runs under [Compose](/docker/compose), and only the edge devices run under [Swarm](/docker/swarm). Kept for reference.
+:::
+
 A point-in-time review (Apr 21, 2026) comparing `swarm.yml` networking against the original [`docker-compose.yml`](/docker/compose) networking, to answer one operational question: does the [Swarm](/docker/swarm) stack keep the same network behavior as the Compose deployment?
 
 Short answer: application hostname behavior is mostly preserved for the central services, the underlying Docker network implementation is not identical, and a few intentional Swarm-specific changes were introduced that are worth understanding before deployment.
@@ -51,7 +55,7 @@ The central services (`mqtt-broker`, `fastapi-app`, `web`, `tcp`, `ntp`, `portai
 3. FastAPI can publish and consume through Mosquitto.
 4. TCP service can reach FastAPI via `fastapi-app`.
 5. Portainer is reachable at the expected URL and port.
-6. IMU services can be scaled from `0` to `1` (see [On-demand IMU activation](/docker/swarm#on-demand-imu-activation)) and still reach MQTT.
+6. IMU services can be scaled from `0` to `1` (the old on-demand activation, since replaced by [device selection](/docker/stack-controller)) and still reach MQTT.
 
 ## Conclusion
 

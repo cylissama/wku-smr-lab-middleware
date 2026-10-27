@@ -1,0 +1,59 @@
+// The edge Pis (deploy/swarm-edge-nodes.yml, Swarm stack "edge").
+// One element per kind of node; the Pis themselves are in deployment.c4.
+model {
+
+  edge = zone 'Edge nodes' {
+    description 'Raspberry Pis, each a Docker Swarm worker. The dashboard deploys their containers for each monitor or session run and removes them on stop.'
+    link /docs/docker/swarm 'Swarm'
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/deploy/swarm-edge-nodes.yml 'swarm-edge-nodes.yml'
+
+    imuNode = zone 'IMU node' {
+      description 'A Pi with one IMU. Six of them: imu-106 … imu-111.'
+      link /docs/hardware/imu 'IMU nodes'
+      link https://github.com/cylissama/wku-smr-lab-imu-edge-node 'IMU edge repo'
+
+      sensor = device 'IMU sensor' {
+        technology 'I2C'
+        description 'TODO: sensor model.'
+      }
+      imuHost = hostService 'imu_host' {
+        technology 'Python, systemd unit imu-hw'
+        description 'Talks to the IMU over I2C and serves a small HTTP API on /run/imu-hw/imu.sock: readyz, status, session start/stop, tare, telemetry stream.'
+        link https://github.com/cylissama/wku-smr-lab-imu-edge-node 'IMU edge repo'
+      }
+      imuEdge = service 'imu_edge' {
+        #perRun
+        technology 'smart-mfg-imu:latest, Swarm service edge_imu-<id>'
+        description 'Starts a session on imu_host at IMU_SAMPLE_HZ, reads its telemetry and publishes each sample to imu/<id>. With IMU_PLC_TRIGGER on (recording), waits for the PLC Data_Start first. Also writes a CSV under /opt/smart-mfg-imu/data.'
+        link https://github.com/cylissama/wku-smr-lab-imu-edge-node 'IMU edge repo'
+      }
+
+      imuHost -[local]-> sensor 'reads'
+      imuEdge -[local]-> imuHost 'session control + telemetry (Unix socket)'
+    }
+
+    cameraNode = zone 'Camera node' {
+      description 'A Pi with a camera. Two of them: camera-front (113) and camera-side (114).'
+      link /docs/hardware/camera 'Camera nodes'
+      link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
+
+      camera = device 'Camera' {
+        technology 'V4L2 /dev/video0'
+        description 'TODO: camera model.'
+      }
+      cameraHost = hostService 'Camera host service' {
+        #placeholder
+        description 'TODO: what provides /run/camera-hw on the Pi.'
+      }
+      cameraEdge = service 'camera_edge' {
+        #perRun
+        technology 'camera-edge:latest, Swarm service edge_camera-<name>'
+        description 'ArUco marker pose detection. Publishes each frame with a detected marker to camera/<id>_<name>; no marker in view means no messages.'
+        link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
+      }
+
+      cameraHost -[local]-> camera 'reads frames'
+      cameraEdge -[local]-> cameraHost 'frames (/run/camera-hw)'
+    }
+  }
+}
