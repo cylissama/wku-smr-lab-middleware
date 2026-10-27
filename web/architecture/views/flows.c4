@@ -1,0 +1,182 @@
+// Dynamic views: how data and control move through the system, step by step.
+// Each step names the code path it follows; keep them in sync with
+// fast_server/main.py, tcp_server/tcp_server.py and stack_controller/.
+views {
+
+  dynamic view imuToDb {
+    title 'Flow: an IMU sample reaches the database'
+    description 'From the sensor on a Pi to an imu_measurement row on the NAS, with a live copy to the dashboard. Camera frames take the same path (camera/#, camera_worker, /ws/camera).'
+    link /docs/hardware/imu 'IMU nodes'
+    link /docs/overview/capture-modes 'Capture modes & sessions'
+
+    edge.imuNode.imuHost -> edge.imuNode.sensor 'reads the IMU over I2C at IMU_SAMPLE_HZ'
+    edge.imuNode.imuEdge -> edge.imuNode.imuHost 'reads the telemetry stream (Unix socket in /run/imu-hw)'
+    edge.imuNode.imuEdge -> ams.mqtt-broker 'publishes the sample to imu/<id>'
+    ams.mqtt-broker -> ams.fastapi-app.ingest 'delivers it (subscription imu/#)'
+    ams.fastapi-app.ingest -> ams.fastapi-app.capture 'monitoring or recording, and this device selected?' {
+      notes 'IDLE and STOPPING drop the message before it is parsed. A device left out of the selection is dropped after parsing.'
+    }
+    ams.fastapi-app.ingest -> ams.fastapi-app.live 'live sample, at most one per device per LIVE_SAMPLE_INTERVAL'
+    ams.fastapi-app.live -> ams.web.dashboard 'pushes it over /ws/imu ([live] line)'
+    ams.fastapi-app.ingest -> ams.fastapi-app.workers 'RECORD only: queues the row with its session_id'
+    ams.fastapi-app.workers -> nas.postgres 'imu_worker inserts a batch every BATCHES rows or B_TIMEOUT s' {
+      notes '''
+        Rows from a session that has already ended are dropped, never written into the next one.
+        While inserts fail, the worker holds at most MAX_BACKLOG_ROWS and reports every BACKLOG_REPORT_INTERVAL s.
+      '''
+    }
+    ams.fastapi-app.workers -> ams.fastapi-app.live '"Inserted N IMU rows" to /ws/imu'
+  }
+
+  dynamic view robotToDb {
+    title 'Flow: a robot line reaches the database'
+    description 'The robot streams CSV lines to tcp, which has its own copy of the capture gate, its own batch worker and no WebSocket.'
+    link /docs/docker/tcp-server 'TCP server'
+
+    ams.fastapi-app.capture -> ams.tcp 'PUT /capture on every mode change (and tcp re-polls GET /capture every CAPTURE_SYNC_INTERVAL s)'
+    robotcell.robot -> ams.tcp 'CSV line over TCP 5001: frame, timestamp, 6 joints, x y z w p r'
+    ams.tcp -> ams.fastapi-app.live 'monitoring or recording and robot/main selected: live sample via POST /send/robot' {
+      notes 'Lines are read but dropped while IDLE or STOPPING, so the robot connection stays up between runs.'
+    }
+    ams.fastapi-app.live -> ams.web.dashboard 'pushes it over /ws/robot'
+    ams.tcp -> nas.postgres 'RECORD only: robot_worker inserts a batch every BATCHES rows or B_TIMEOUT s'
+    ams.tcp -> ams.fastapi-app.live '"Inserted N robot rows" via POST /send/robot'
+  }
+
+  dynamic view startMonitoring {
+    variant sequence
+    title 'Flow: Start Monitoring'
+    description 'Deploys the selected edge services and shows their data live without storing anything. Only from IDLE.'
+    link /docs/overview/capture-modes 'Capture modes & sessions'
+    link /docs/docker/stack-controller 'Stack controller & device selection'
+
+    operator -> ams.web.dashboard 'selects devices, clicks Start Monitoring'
+    ams.web.dashboard -> ams.fastapi-app.sessions 'POST /listen/start {devices} (holds session_lock)'
+    ams.fastapi-app.sessions -> ams.stack-controller 'GET /stacks/edge/services: device catalog from smr.category / smr.device labels'
+    ams.fastapi-app.sessions -> ams.fastapi-app.capture 'MONITOR + device selection'
+    ams.fastapi-app.capture -> ams.tcp 'PUT /capture'
+    ams.fastapi-app.sessions -> ams.stack-controller 'POST /stacks/edge/deploy {services, env: IMU_PLC_TRIGGER=false}'
+    ams.stack-controller -> ams.docker 'docker stack deploy --prune with a compose copy of only the selected services'
+    ams.docker -> edge.imuNode.imuEdge 'starts edge_imu-<id> on its Pi'
+    ams.docker -> edge.cameraNode.cameraEdge 'starts edge_camera-<name> on its Pi'
+    ams.web.dashboard -> ams.fastapi-app.live 'polls GET /devices every 3 s: receiving, rate, last seen' {
+      notes 'Live samples then flow as in "an IMU sample reaches the database", without the database steps. On a deploy failure the gate goes back to IDLE.'
+    }
+  }
+
+  dynamic view startSession {
+    variant sequence
+    title 'Flow: Start Session'
+    description 'Creates the session row, opens the gate, then (re)deploys the edge for recording. From IDLE or MONITOR.'
+    link /docs/operations/running-a-test 'Running a test session'
+    link /docs/operations/run-parameters 'Run parameters'
+
+    operator -> ams.web.dashboard 'enters a label, clicks Start Session'
+    ams.web.dashboard -> ams.fastapi-app.sessions 'GET /session/start/{label}?session_label=…&devices=… (holds session_lock)'
+    ams.fastapi-app.sessions -> ams.stack-controller 'GET /stacks/edge/env: run parameter defaults'
+    ams.fastapi-app.sessions -> nas.postgres 'creates the session row with devices and parameters (503 if the DB is down)'
+    ams.fastapi-app.sessions -> ams.fastapi-app.capture 'RECORD + session id + selection'
+    ams.fastapi-app.capture -> ams.tcp 'PUT /capture'
+    opt 'unless already monitoring the same devices with the same settings' {
+      ams.fastapi-app.sessions -> ams.stack-controller 'POST /stacks/edge/deploy {services, env: IMU_PLC_TRIGGER=true}' {
+        notes 'IMU_PLC_TRIGGER is true for recording unless IMU_PLC_TRIGGER_ON_RECORD is off, so coming from monitoring usually redeploys. Only the IMU services restart.'
+      }
+      ams.stack-controller -> ams.docker 'docker stack deploy --prune'
+      ams.docker -> edge.imuNode.imuEdge 'restarts the IMU services with the recording env'
+    }
+    ams.fastapi-app.sessions -> ams.fastapi-app.live '/ws/misc: start the robot once the IMUs show as running'
+    edge.imuNode.imuEdge -> robotcell.plc 'waits for Data_Start, then starts streaming'
+    operator -> robotcell.robot 'starts the robot program'
+  }
+
+  dynamic view plcStop {
+    variant sequence
+    title 'Flow: the session stops (PLC Db_Stop or the Stop button)'
+    description 'Closes the gate, removes the edge stack, drains every queue, ends the session row and backs up the database.'
+    link /docs/operations/plc-auto-stop 'PLC auto stop'
+    link /docs/docker/automations 'Automations (backups)'
+
+    alt {
+      when 'robot finished (PLC_AUTO_STOP=true)' {
+        ams.fastapi-app.plcWatcher -> robotcell.plc 'polls Db_Stop over EtherNet/IP (pycomm3, own thread)'
+        ams.fastapi-app.plcWatcher -> ams.fastapi-app.sessions 'rising edge: stop_session_from_plc()' {
+          notes 'Ignored unless the mode is RECORD and no start or stop holds session_lock.'
+        }
+      }
+      else 'Stop button' {
+        operator -> ams.web.dashboard 'clicks Stop Session'
+        ams.web.dashboard -> ams.fastapi-app.sessions 'GET /session/stop' {
+          notes 'A click just after the PLC already stopped the session gets already_stopped.'
+        }
+      }
+    }
+    ams.fastapi-app.sessions -> ams.fastapi-app.capture 'STOPPING: nothing new is queued, the session id is kept'
+    ams.fastapi-app.capture -> ams.tcp 'PUT /capture'
+    ams.fastapi-app.sessions -> ams.stack-controller 'POST /stacks/edge/remove'
+    ams.stack-controller -> ams.docker 'docker stack rm'
+    par {
+      ams.fastapi-app.workers -> nas.postgres 'flushes the last IMU and camera batches'
+      ams.tcp -> nas.postgres 'flushes the last robot batch'
+    }
+    ams.fastapi-app.sessions -> ams.tcp 'polls GET /queue/status until every queue is empty (10 s at most)'
+    ams.fastapi-app.sessions -> nas.postgres 'ends the session row' {
+      notes 'With the DB down the stop still succeeds: the end time is saved as pending_session_end once the DB is back, and the backup is skipped.'
+    }
+    ams.fastapi-app.sessions -> ams.fastapi-app.capture 'IDLE'
+    ams.fastapi-app.sessions -> ams.fastapi-app.backup 'backup on stop'
+    ams.fastapi-app.backup -> nas.postgres 'pg_dump'
+    ams.fastapi-app.backup -> nas.backups 'writes the .dump file to /db_backups'
+    ams.fastapi-app.sessions -> ams.fastapi-app.live '/ws/misc: session ended, backup result'
+  }
+
+  dynamic view liveUpdates {
+    title 'Flow: live updates to the dashboard'
+    description 'Four WebSocket channels, each a ConnectionManager in connection_manager.py. Other services broadcast with POST /send/{channel}.'
+    link /docs/overview/dashboard 'The dashboard'
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/connection_manager.py 'connection_manager.py'
+
+    ams.web.dashboard -> ams.fastapi-app.live 'opens /ws/camera, /ws/imu, /ws/robot, /ws/misc (proxied by nginx)'
+    ams.fastapi-app.ingest -> ams.fastapi-app.live 'IMU and camera live samples'
+    ams.fastapi-app.workers -> ams.fastapi-app.live 'insert results and errors'
+    ams.tcp -> ams.fastapi-app.live 'POST /send/robot: robot live samples, inserts, errors'
+    ams.fastapi-app.sessions -> ams.fastapi-app.live 'session, monitoring and deploy messages (/ws/misc)'
+    ams.fastapi-app.health -> ams.fastapi-app.live 'health state changes (/ws/misc)'
+    ams.fastapi-app.live -> ams.web.dashboard 'broadcasts each message to every open socket on its channel'
+    ams.web.dashboard -> ams.fastapi-app.sessions 'also polls GET /capture and /devices'
+  }
+
+  dynamic view healthChecks {
+    title 'Flow: health checks'
+    description 'health_monitor() re-checks every dependency every HEALTH_INTERVAL s. GET /health always answers 200; overall is ok, degraded or starting.'
+    link /docs/docker/health-and-logs 'Health & logs'
+    link /docs/operations/troubleshooting 'Troubleshooting'
+
+    par {
+      ams.fastapi-app.health -> nas.postgres 'SELECT 1'
+      ams.fastapi-app.health -> ams.stack-controller 'GET /health'
+      ams.fastapi-app.health -> ams.tcp 'GET /queue/status (tcp and its DB connection)'
+      ams.fastapi-app.health -> nas.logs 'can the log files be written?'
+      ams.fastapi-app.health -> nas.backups 'is /db_backups writable?'
+      ams.fastapi-app.health -> ams.fastapi-app.plcWatcher 'connected, last read age, tag errors'
+    }
+    ams.fastapi-app.health -> ams.fastapi-app.live 'state transitions to /ws/misc and the logs'
+    ams.web.dashboard -> ams.fastapi-app.health 'GET /health'
+  }
+
+  dynamic view watchdog {
+    title 'Flow: container health and the watchdog'
+    description 'Docker runs each container’s healthcheck; stack-controller restarts unhealthy smr.autoheal containers and serves their state and logs even while fastapi-app is down.'
+    link /docs/docker/health-and-logs 'Health & logs'
+
+    ams.docker -> ams.fastapi-app.health 'HEALTHCHECK: python -m fast_server.healthcheck (GET /health)'
+    ams.docker -> ams.tcp 'HEALTHCHECK: GET /queue/status'
+    ams.stack-controller -> ams.docker 'every WATCHDOG_INTERVAL s: lists smr.autoheal containers that are unhealthy' {
+      notes 'At most WATCHDOG_MAX_RESTARTS restarts per WATCHDOG_WINDOW, then it gives up and logs a CRITICAL event for a person.'
+    }
+    ams.stack-controller -> ams.docker 'restarts the unhealthy container'
+    ams.web.dashboard -> ams.stack-controller 'GET /api/system/containers and /api/system/logs' {
+      notes 'nginx proxies only these two stack-controller routes, unauthenticated and read-only, so the Container Health and Logs boxes work while fastapi-app is down.'
+    }
+    ams.stack-controller -> ams.docker 'container state, health probes, logs (credentials redacted)'
+  }
+}
