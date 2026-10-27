@@ -2,6 +2,7 @@
 .gitignore
 node_modules/
 dist/
+arch-dist/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
 npm-debug.log*
