@@ -5,6 +5,10 @@ This project is deployed almost entirely using containerization with Docker tech
 Docker compose and Docker swarm are used to create "stacks" that can be deployed with simple config files and then closed and opened when needed. 
 
 We 
+::: tip Interactive architecture diagram
+The whole system is also drawn as a clickable, zoomable diagram at [/architecture/](/architecture/){target="_self"}: every machine, container and connection, with links to the code and these docs. It's built from the model in `web/architecture/`.
+:::
+
 ## How data flows through the system
 
 Edge devices never talk to the database directly — everything is mediated by `fastapi-app` (MQTT-sourced IMU/camera data) or `tcp-server` (robot data). Both services share the same `db/database.py` module and the same PostgreSQL instance, keyed by the currently active session. Ingestion is gated by a capture state (`fast_server/capture.py`) that `fastapi-app` owns and pushes to `tcp-server`: data is only queued for storage while a session is recording, and is dropped otherwise.

@@ -16,6 +16,9 @@ export default defineConfig({
       { text: 'Network', link: '/network/topology' },
       { text: 'Expanding', link: '/expanding/' },
       { text: 'Operations', link: '/operations/running-a-test' },
+      // Not a docs page: the LikeC4 site built from web/architecture/. VitePress
+      // prefixes base (/docs/) onto nav links, so climb out of it: /docs/../architecture/
+      { text: 'Architecture', link: '/../architecture/', target: '_self' },
     ],
 
     sidebar: [
