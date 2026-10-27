@@ -154,7 +154,7 @@ docker node update --label-add camera=front <node-name>   # or camera=side
 
 On the AMS host, in `/home/ubuntu/wku-smr-lab-middleware`:
 
-1. In `deploy/swarm-edge-nodes.yml`, copy an existing `imu-1xx` service block and change every `IMU_1xx_` variable to the new id. Keep the `smr.category` / `smr.device` labels; they put the device on the dashboard.
+1. In `deploy/swarm-edge-nodes.yml`, copy an existing `imu-1xx` service block and change every `IMU_1xx_` variable to the new id. Keep the `smr.category` / `smr.device` labels; they put the device on the dashboard. Update its `smr.description` label too, then run `python architecture/sync.py` so the new Pi appears on the [architecture diagram](/expanding/architecture).
 2. Add `IMU_<id>_DEVICE_ID` and `IMU_<id>_HOSTNAME` to `deploy/.env`, and to `deploy/.env.example` (with the real hostname, no secrets).
 3. Reload the dashboard. The new device shows up in the Devices box; no restart is needed because stack-controller reads both files on each request.
 

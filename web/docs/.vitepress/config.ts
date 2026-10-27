@@ -79,6 +79,7 @@ export default defineConfig({
         items: [
           { text: 'Expanding the system', link: '/expanding/' },
           { text: 'Bringing a node online', link: '/expanding/swarm-nodes' },
+          { text: 'Keeping the architecture current', link: '/expanding/architecture' },
         ],
       },
       {

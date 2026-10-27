@@ -8,7 +8,7 @@ aside: false
 Almost everything runs in Docker containers. There are two groups of them, called **stacks**: an always-on stack on the AMS host, and an edge stack on the Raspberry Pis that the dashboard starts and stops for each run.
 
 ::: tip Interactive architecture diagram
-The whole system is also drawn as a clickable, zoomable diagram at [/architecture/](/architecture/){target="_self"}: every machine, container and connection, with links to the code and these docs. It's built from the model in `web/architecture/`.
+The whole system is also drawn as a clickable, zoomable diagram at [/architecture/](/architecture/){target="_self"}: every machine, container and connection, with links to the code and these docs. It's built from the model in `web/architecture/`, which also draws the diagrams on this page; to change it, see [Keeping the architecture current](/expanding/architecture).
 :::
 
 ## How data flows through the system
