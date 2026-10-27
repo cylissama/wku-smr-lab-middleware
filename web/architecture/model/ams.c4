@@ -1,0 +1,140 @@
+// The always-on broker stack on the AMS host (docker-compose.yml).
+model {
+
+  ams = zone 'AMS host "IIoT"' {
+    description 'Mini PC at 192.168.2.100. Runs docker-compose.yml (always on) and is the Docker Swarm manager for the edge Pis.'
+    link /docs/hardware/data-broker-mini-pc 'AMS host'
+    link /docs/docker/compose 'Compose'
+
+    mqtt = broker 'mqtt-broker' {
+      technology 'eclipse-mosquitto:2, ports 1883 and 9001'
+      description 'Receives IMU and camera messages from the edge Pis.'
+      metadata { compose_service 'mqtt-broker' }
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/mqtt_conf/mosquitto.conf 'mosquitto.conf'
+    }
+
+    fastapi = service 'fastapi-app' {
+      technology 'Python, FastAPI, port 8000'
+      description 'The API behind the dashboard. Owns sessions and the capture mode, ingests MQTT, writes to Postgres in batches, asks stack-controller to deploy the edge, watches the PLC, runs backups.'
+      metadata { compose_service 'fastapi-app' }
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/main.py 'fast_server/main.py'
+      link /docs/docker/api 'API reference'
+
+      ingest = component 'MQTT ingest' {
+        description 'Subscribes to imu/# and camera/#, parses each payload into a row.'
+        link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/parsing.py 'parsing.py'
+      }
+      capture = component 'Capture gate' {
+        description 'CaptureState IDLE / MONITOR / RECORD / STOPPING plus the device selection. Only RECORD queues data for the database. Pushed to tcp on every change.'
+        link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/capture.py 'capture.py'
+        link /docs/overview/capture-modes 'Capture modes & sessions'
+      }
+      sessions = component 'Sessions & deploys' {
+        description 'Start/stop monitoring and sessions under session_lock. Turns the device selection into per-stack service lists and the run parameters into each deploy env.'
+        link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/run_params.py 'run_params.py'
+        link /docs/operations/run-parameters 'Run parameters'
+      }
+      workers = component 'Batch workers' {
+        description 'imu_worker / camera_worker: flush queued rows every BATCHES rows or B_TIMEOUT seconds; drop rows from an ended session.'
+      }
+      live = component 'Live channels' {
+        description 'LiveSampler (one sample per device per LIVE_SAMPLE_INTERVAL) and the /ws/camera, /ws/imu, /ws/robot, /ws/misc WebSocket managers. POST /send/{channel} lets other services broadcast.'
+        link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/connection_manager.py 'connection_manager.py'
+      }
+      plcWatcher = component 'PLC watcher' {
+        description 'PLCSignalWatcher polls Db_Stop with pycomm3 in a thread; each rising edge stops a RECORD session (PLC_AUTO_STOP).'
+        link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/plc_listener.py 'plc_listener.py'
+      }
+      health = component 'Health & supervisors' {
+        description 'Connects to the DB and MQTT in the background with backoff; GET /health for db, mqtt, stack_controller, tcp, logs, backups, plc.'
+        link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/fast_server/health.py 'health.py'
+        link /docs/docker/health-and-logs 'Health & logs'
+      }
+      backup = component 'Backups' {
+        description 'pg_dump on every session stop and on demand; pg_restore drops and recreates the database.'
+        link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/db/database.py 'db/database.py'
+      }
+
+      ingest -> capture 'asks whether to queue'
+      capture -> workers 'queues rows (RECORD only)'
+      capture -> live 'live samples (MONITOR, RECORD)'
+      sessions -> capture 'sets mode and selection'
+      plcWatcher -> sessions 'Db_Stop pulse stops the session'
+      sessions -> backup 'backup on stop'
+    }
+
+    tcp = service 'tcp' {
+      technology 'Python asyncio, ports 5001 (robot) and 8090 (status)'
+      description 'Robot TCP listener. Splits the stream into CSV lines, applies the capture gate it gets from fastapi-app, batches rows into Postgres. Status server on 8090.'
+      metadata { compose_service 'tcp' }
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/tcp_server/tcp_server.py 'tcp_server.py'
+      link /docs/docker/tcp-server 'TCP server'
+    }
+
+    stackController = service 'stack-controller' {
+      technology 'Python, port 8080 (internal)'
+      description 'Deploys and removes whitelisted Swarm stacks (stacks.yml) with only the selected services. Runs the container Watchdog and serves read-only /containers and /logs.'
+      metadata { compose_service 'stack-controller' }
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/stack_controller/main.py 'stack_controller/main.py'
+      link /docs/docker/stack-controller 'Stack controller & device selection'
+    }
+
+    docker = hostService 'Docker engine' {
+      technology 'Docker, Swarm manager'
+      description 'The host Docker daemon. Runs the compose stack and, as Swarm manager, schedules the edge stack onto the Pis.'
+      link /docs/docker/swarm 'Swarm'
+    }
+
+    web = webapp 'web' {
+      technology 'nginx, port 80'
+      description 'Serves the dashboard, the docs and this architecture site. Proxies /api/ to fastapi-app, and /api/system/containers and /api/system/logs to stack-controller so those work while fastapi-app is down.'
+      metadata { compose_service 'web' }
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/web/nginx.conf 'nginx.conf'
+
+      dashboard = component 'Dashboard SPA' {
+        technology 'React, Vite'
+        description 'Sessions, device selection, run parameters, live message boxes, backups, container health and logs.'
+        link /docs/overview/dashboard 'The dashboard'
+      }
+      docs = component 'Docs site' {
+        technology 'VitePress'
+        description 'This documentation, served under /docs/.'
+        link /docs/ 'Docs'
+      }
+    }
+
+    ntp = service 'ntp' {
+      technology 'cturra/ntp, UDP 123'
+      description 'Time source synced from Google public NTP. TODO: list which machines sync from it.'
+      metadata { compose_service 'ntp' }
+      link /docs/docker/automations#time-synchronization 'Time synchronization'
+    }
+
+    pgadmin = webapp 'pgAdmin' {
+      technology 'dpage/pgadmin4:9, port 5050'
+      description 'One account per person, each tied to its own Postgres role (lab_viewers or lab_admins).'
+      metadata { compose_service 'pgadmin' }
+      link /docs/data/accessing-database 'Accessing the database'
+    }
+
+    localPostgres = database 'postgres (local-db profile)' {
+      #optional
+      technology 'postgres:16-alpine'
+      description 'Only with `--profile local-db`, for running the stack away from the NAS. Not used in the lab.'
+      metadata { compose_service 'postgres' }
+      link /docs/docker/compose 'Compose'
+    }
+
+    // Inside the AMS host
+    mqtt -[mqtt]-> fastapi.ingest 'imu/#, camera/#'
+    web -[http]-> fastapi '/api/ proxy, /ws/* WebSockets'
+    web -[http]-> stackController '/api/system/containers, /api/system/logs'
+    fastapi.sessions -[http]-> stackController 'deploy / remove edge stack, list services, read env defaults'
+    fastapi.health -[http]-> stackController 'health check'
+    fastapi.capture -[http]-> tcp 'PUT /capture (mode + selection)'
+    fastapi.health -[http]-> tcp 'GET /queue/status'
+    tcp -[http]-> fastapi.capture 'GET /capture every 5 s'
+    tcp -[http]-> fastapi.live 'POST /send/robot (live lines, status)'
+    stackController -[docker]-> docker 'stack deploy / rm, container state, logs, restarts'
+  }
+}

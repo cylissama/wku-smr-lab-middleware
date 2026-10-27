@@ -1,0 +1,78 @@
+// Everything outside the AMS host and the edge Pis: people, the robot cell,
+// the NAS and downstream consumers. How they connect is in connections.c4.
+model {
+
+  operator = person 'Lab operator' {
+    description 'Runs test sessions from the dashboard: picks devices, sets run parameters, starts and stops monitoring and sessions.'
+    link /docs/operations/running-a-test 'Running a test session'
+  }
+
+  student = person 'Student / researcher' {
+    description 'Queries recorded sessions through pgAdmin with their own read-only Postgres role.'
+    link /docs/data/accessing-database 'Accessing the database'
+  }
+
+  robotcell = zone 'Robot cell' {
+    description 'The FANUC robot and the PLC that sequences each run (192.168.1.x).'
+
+    robot = device 'FANUC robot' {
+      technology 'FANUC controller, 192.168.1.100'
+      description 'Started by hand. Its controller opens a TCP connection to the AMS and streams joint angles and tool pose as CSV lines. Nothing is sent back.'
+      link /docs/hardware/robot-arm 'Robot arm'
+    }
+
+    plc = device 'Cell PLC' {
+      technology 'Allen-Bradley 1769-L32E, 192.168.1.103'
+      description '''
+        Signals each robot run:
+        - `Data_Start`: IMUs start streaming (when the PLC trigger is on)
+        - `IMU_Tare`: IMUs tare
+        - `Db_Stop`: a pulse when the robot finishes; stops a recording session (PLC auto stop)
+      '''
+      link /docs/hardware/plc 'Cell PLC'
+      link /docs/operations/plc-auto-stop 'PLC auto stop'
+    }
+  }
+
+  nas = zone 'Synology NAS' {
+    description 'Holds the database, its backups and the log files (192.168.1.104).'
+
+    postgres = database 'PostgreSQL' {
+      technology 'Postgres, port 5433'
+      description 'The lab database: sessions, devices, and the imu_measurement, image_detection and robot tables. Roles lab_admins and lab_viewers for people.'
+      link /docs/data/database-structure 'Database structure'
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/db/schema.sql 'db/schema.sql'
+    }
+
+    backups = share 'Backups share' {
+      technology 'NFS /volume1/docker/postgres/backups'
+      description 'pg_dump files, written on every session stop and on demand. Mounted at /db_backups in fastapi-app.'
+      link /docs/docker/automations 'Automations'
+    }
+
+    logs = share 'Logs share' {
+      technology 'NFS /volume1/docker/postgres/logs'
+      description 'Per-session data log files from fastapi-app and tcp.'
+      link /docs/docker/health-and-logs 'Health & logs'
+    }
+  }
+
+  downstream = zone 'Downstream' {
+    description 'Consumers of the data outside this repo.'
+
+    imageAnalysis = external 'Image analysis machine' {
+      #placeholder
+      description 'TODO: what it is, who owns it, and what it reads (camera stream? database?).'
+    }
+
+    twin = external 'Digital twin' {
+      #placeholder
+      description 'TODO: confirm. GET /robot/{label} returns a `twins` array shaped for it; the dashboard links to it when VITE_TWINS_URL is set.'
+    }
+
+    ai = external 'AI service' {
+      #placeholder
+      description 'TODO: what it is and what it reads. The dashboard links to it when VITE_AI_URL is set.'
+    }
+  }
+}
