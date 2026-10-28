@@ -109,6 +109,9 @@ PLC_POLL_S = max(0.01, float(os.getenv("PLC_POLL_S", 0.05)))
 PLC_RETRY_S = float(os.getenv("PLC_RETRY_S", 1.0))
 PLC_FAKE = env_flag("PLC_FAKE")
 PLC_FAKE_SPEED = float(os.getenv("PLC_FAKE_SPEED", 1.0))
+# The cell's real PLC. Monitoring can be pointed at a simulated PLC (the
+# MONITOR_PLC_IP run parameter), but never at this one.
+REAL_PLC_IP = os.getenv("REAL_PLC_IP", PLC_PATH.split("/")[0]).strip()
 
 # Dependency health, served by GET /health -- see fast_server/health.py
 health = HealthRegistry(
@@ -224,15 +227,30 @@ deployed_env: dict[str, str] | None = None
 
 # Edge-stack settings for a deploy in this capture mode (stack-controller only
 # accepts the variables a stack lists under env_overrides in stacks.yml): the
-# edge run parameters, plus IMU_PLC_TRIGGER. Monitoring streams right away; in
-# a recording session the IMU nodes wait for the PLC's Data_Start pulse before
-# sending, unless IMU_PLC_TRIGGER_ON_RECORD is off (e.g. with no robot).
+# edge run parameters, plus IMU_PLC_TRIGGER. Monitoring streams right away,
+# unless MONITOR_PLC_IP names a simulated PLC: then the IMUs and cameras use it
+# and wait for its Data_Start. In a recording session the IMU nodes wait for
+# the real PLC's (the .env PLC paths) Data_Start pulse before sending, unless
+# IMU_PLC_TRIGGER_ON_RECORD is off (e.g. with no robot).
 def stack_env(mode: CaptureMode) -> dict[str, str]:
     env = {k: run_params.env_value(v) for k, v in run_overrides.items() if k in run_params.EDGE_PARAMS}
+    sim_plc = monitor_plc_ip()
+    if mode == CaptureMode.MONITOR and sim_plc:
+        env.update(IMU_PLC_TRIGGER="true", IMU_PLC_PATH=sim_plc, CAMERA_PLC_TRIGGER="true", CAMERA_PLC_PATH=sim_plc)
+        return env
     wait = mode == CaptureMode.RECORD and run_overrides.get(
         "IMU_PLC_TRIGGER_ON_RECORD", env_flag("IMU_PLC_TRIGGER_ON_RECORD", True))
     env["IMU_PLC_TRIGGER"] = "true" if wait else "false"
     return env
+
+# The simulated PLC monitoring uses, or "" for none
+def monitor_plc_ip() -> str:
+    return run_overrides.get("MONITOR_PLC_IP", "")
+
+def is_real_plc(ip: str) -> bool:
+    return bool(ip) and ip == REAL_PLC_IP
+
+REAL_PLC_REFUSAL = f"{REAL_PLC_IP} is the real cell PLC: monitoring can't use it. Enter a simulated PLC's IP, or 0 for none"
 
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not
 async def try_backup() -> dict[str, Any]:
@@ -670,7 +688,8 @@ async def run_param_defaults() -> dict[str, Any]:
     listings = await asyncio.gather(*(stack_controller_request("GET", f"/stacks/{s}/env") for s in MANAGED_STACKS))
     env = {k: v for listing in listings for k, v in (listing.get("env") or {}).items()}
 
-    defaults: dict[str, Any] = {"IMU_PLC_TRIGGER_ON_RECORD": env_flag("IMU_PLC_TRIGGER_ON_RECORD", True)}
+    defaults: dict[str, Any] = {"IMU_PLC_TRIGGER_ON_RECORD": env_flag("IMU_PLC_TRIGGER_ON_RECORD", True),
+                                "MONITOR_PLC_IP": ""}
     for key in run_params.EDGE_PARAMS:
         try:
             defaults[key] = run_params.parse(key, env[key])
@@ -679,8 +698,10 @@ async def run_param_defaults() -> dict[str, Any]:
     return defaults
 
 # Every run parameter's value for the next deploy, as stored in session.parameters
+# (monitoring-only ones left out: a session doesn't use them)
 async def effective_run_params() -> dict[str, Any]:
-    return {**await run_param_defaults(), **run_overrides}
+    values = {**await run_param_defaults(), **run_overrides}
+    return {k: v for k, v in values.items() if not run_params.PARAMS.get(k, {}).get("monitor_only")}
 
 # Run parameters can't change while a session is recording or stopping
 EDITABLE_PARAM_MODES = (CaptureMode.IDLE, CaptureMode.MONITOR)
@@ -724,6 +745,9 @@ async def put_parameters(body: RunParamsUpdate) -> dict[str, Any]:
                     new[key] = run_params.parse(key, value)
                 except ValueError as e:
                     errors[key] = str(e)
+                else:
+                    if key == "MONITOR_PLC_IP" and is_real_plc(new[key]):
+                        errors[key] = REAL_PLC_REFUSAL
 
         if errors:
             return {"error": "; ".join(errors.values()), "errors": errors, "success": False}
@@ -773,6 +797,12 @@ async def _start_listening(body: DeviceSelection | None) -> dict[str, Any]:
     if capture.mode != CaptureMode.IDLE:
         return {"error": f"Can't start monitoring while {capture.mode.value}", "success": False}
 
+    # Already refused by PUT /parameters, but a saved value or a changed
+    # REAL_PLC_IP could still get here
+    sim_plc = monitor_plc_ip()
+    if is_real_plc(sim_plc):
+        return {"error": REAL_PLC_REFUSAL, "success": False}
+
     try:
         selected, plan = await resolve_selection(body.devices if body else None)
     except Exception as e:
@@ -780,6 +810,9 @@ async def _start_listening(body: DeviceSelection | None) -> dict[str, Any]:
 
     await set_capture(CaptureMode.MONITOR, devices=selected)
     await broadcast_message(misc_manager, "Monitoring started -- live data only, nothing is stored", "info")
+    if sim_plc:
+        await broadcast_message(misc_manager, f"Using the simulated PLC at {sim_plc}: IMUs and cameras send after its "
+                                              "Data_Start and stop on Db_Stop", "info")
 
     deploy_results = await deploy_managed_stacks(plan, stack_env(CaptureMode.MONITOR))
     failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]

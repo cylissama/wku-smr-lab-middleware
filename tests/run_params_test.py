@@ -28,6 +28,15 @@ class ParseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_params.parse("IMU_PLC_TRIGGER_ON_RECORD", "maybe")
 
+    def test_ip(self):
+        self.assertEqual(run_params.parse("MONITOR_PLC_IP", " 192.168.1.50 "), "192.168.1.50")
+        for none in ("", "0", "0.0.0.0", None):
+            with self.subTest(none=none):
+                self.assertEqual(run_params.parse("MONITOR_PLC_IP", none), "")
+        for bad in ("192.168.1", "300.1.1.1", "plc.local", "192.168.1.50/0", 5):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                run_params.parse("MONITOR_PLC_IP", bad)
+
     def test_env_value(self):
         self.assertEqual(run_params.env_value(True), "true")
         self.assertEqual(run_params.env_value(200), "200")
@@ -35,6 +44,12 @@ class ParseTests(unittest.TestCase):
     def test_every_edge_param_is_overridable_in_stacks_yml(self):
         stacks = yaml.safe_load(Path("stack_controller/stacks.yml").read_text())["stacks"]
         self.assertLessEqual(set(run_params.EDGE_PARAMS), set(stacks["edge"]["env_overrides"]))
+
+    def test_every_stack_env_variable_is_overridable_in_stacks_yml(self):
+        stacks = yaml.safe_load(Path("stack_controller/stacks.yml").read_text())["stacks"]
+        with patch.object(m, "run_overrides", {"MONITOR_PLC_IP": "192.168.1.50", "IMU_SAMPLE_HZ": 50}):
+            sent = {k for mode in (CaptureMode.MONITOR, CaptureMode.RECORD) for k in m.stack_env(mode)}
+        self.assertLessEqual(sent, set(stacks["edge"]["env_overrides"]))
 
 
 class StoreTests(unittest.TestCase):
@@ -180,6 +195,54 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
         m.run_overrides = {"IMU_PLC_TRIGGER_ON_RECORD": False}
         self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_PLC_TRIGGER": "false"})
 
+    async def test_stack_env_monitoring_a_simulated_plc(self):
+        m.run_overrides = {"MONITOR_PLC_IP": "192.168.1.50"}
+
+        self.assertEqual(m.stack_env(CaptureMode.MONITOR), {
+            "IMU_PLC_TRIGGER": "true", "IMU_PLC_PATH": "192.168.1.50",
+            "CAMERA_PLC_TRIGGER": "true", "CAMERA_PLC_PATH": "192.168.1.50",
+        })
+        # Recording ignores it: the .env PLC paths (the real PLC) apply
+        self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_PLC_TRIGGER": "true"})
+
+        m.run_overrides = {"MONITOR_PLC_IP": ""}
+        self.assertEqual(m.stack_env(CaptureMode.MONITOR), {"IMU_PLC_TRIGGER": "false"})
+
+    async def test_put_refuses_the_real_plc(self):
+        with patch.object(m, "REAL_PLC_IP", "192.168.1.103"):
+            result = await m.put_parameters(m.RunParamsUpdate(values={"MONITOR_PLC_IP": "192.168.1.103"}))
+
+        self.assertFalse(result["success"])
+        self.assertIn("real cell PLC", result["errors"]["MONITOR_PLC_IP"])
+        self.assertEqual(m.run_overrides, {})
+
+    async def test_put_while_monitoring_a_new_plc_ip_redeploys(self):
+        m.capture.set(CaptureMode.MONITOR, devices=None)
+        m.deployed_env = {"IMU_PLC_TRIGGER": "false"}
+
+        result = await m.put_parameters(m.RunParamsUpdate(values={"MONITOR_PLC_IP": "192.168.1.50"}))
+
+        self.assertTrue(result["redeployed"])
+        self.assertEqual(self.deploys[0]["env"]["IMU_PLC_PATH"], "192.168.1.50")
+
+    async def test_listen_start_uses_the_simulated_plc(self):
+        m.run_overrides = {"MONITOR_PLC_IP": "192.168.1.50"}
+
+        result = await m.start_listening()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(self.deploys[0]["env"]["CAMERA_PLC_PATH"], "192.168.1.50")
+
+    async def test_listen_start_refuses_the_real_plc(self):
+        m.run_overrides = {"MONITOR_PLC_IP": "192.168.1.103"}   # e.g. from a saved file
+
+        with patch.object(m, "REAL_PLC_IP", "192.168.1.103"):
+            result = await m.start_listening()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(m.capture.mode, CaptureMode.IDLE)
+        self.assertEqual(self.deploys, [])
+
     async def test_start_session_records_what_it_deploys(self):
         m.run_overrides = {"IMU_SAMPLE_HZ": 200}
 
@@ -189,6 +252,14 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
         params = self.db.create_session.await_args.kwargs["parameters"]
         self.assertEqual((params["IMU_SAMPLE_HZ"], params["IMU_PLC_MAX_RUN_S"]), (200, 600))
         self.assertEqual(self.deploys, [{"env": {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "true"}}])
+
+    async def test_start_session_leaves_out_the_monitoring_plc(self):
+        m.run_overrides = {"MONITOR_PLC_IP": "192.168.1.50"}
+
+        await m.start_session("lbl", session_label="Full System")
+
+        self.assertNotIn("MONITOR_PLC_IP", self.db.create_session.await_args.kwargs["parameters"])
+        self.assertEqual(self.deploys, [{"env": {"IMU_PLC_TRIGGER": "true"}}])
 
 
 if __name__ == "__main__":
