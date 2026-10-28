@@ -268,7 +268,8 @@ export default function DataDashboard() {
         return data;
     };
 
-    const changedRunParams = (runParams ?? []).filter((param) => param.overridden);
+    // Monitoring-only ones (the simulated PLC) don't apply to a session
+    const changedRunParams = (runParams ?? []).filter((param) => param.overridden && !param.monitor_only);
 
     useEffect(() => {
         if (!dbUp) {
