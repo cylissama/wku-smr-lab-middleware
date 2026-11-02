@@ -252,6 +252,26 @@ def is_real_plc(ip: str) -> bool:
 
 REAL_PLC_REFUSAL = f"{REAL_PLC_IP} is the real cell PLC: monitoring can't use it. Enter a simulated PLC's IP, or 0 for none"
 
+# The backup a session stop starts in the background (see start_stop_backup)
+backup_task: asyncio.Task | None = None
+
+def backup_running() -> bool:
+    return backup_task is not None and not backup_task.done()
+
+BACKUP_BUSY = {"success": False, "error": "A backup is already running, try again when it finishes"}
+
+# Starts the end-of-session backup without waiting for it, so a stop doesn't
+# hold session_lock through ~20 s of pg_dump (which made a Start right after a
+# stop hang). Its result reaches the dashboard via /ws/misc and the logs.
+def start_stop_backup() -> dict[str, Any]:
+    global backup_task
+    if backup_running():
+        loggers.log_event("Skipped the end-of-session backup: the previous one is still running",
+                          category="backup", level=logging.WARNING)
+        return {**BACKUP_BUSY, "skipped": True}
+    backup_task = start_background(try_backup())
+    return {"success": True, "started": True}
+
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not
 async def try_backup() -> dict[str, Any]:
 
@@ -377,6 +397,8 @@ def list_backups() -> dict[str, list[str]]:
 @app.get("/backup")
 async def backup() -> dict[str, Any]:
   require_db()
+  if backup_running():
+      return BACKUP_BUSY
   return await try_backup()
 
 # API to attempt to restore a backup
@@ -384,6 +406,10 @@ async def backup() -> dict[str, Any]:
 async def restore_backup(filename: str) -> dict[str, Any]:
 
     db = require_db()
+
+    # Restoring drops the database under a running pg_dump
+    if backup_running():
+        return BACKUP_BUSY
 
     try:
 
@@ -1105,7 +1131,7 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
 
     await broadcast_message(misc_manager, f"Session ended with logs successfully{because}")
 
-    msg = await try_backup()
+    msg = start_stop_backup()
     last_stop = (session_id, time.monotonic(), reason)
 
     return {
