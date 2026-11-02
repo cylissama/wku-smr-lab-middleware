@@ -659,6 +659,9 @@ async def get_devices() -> dict[str, Any]:
             status = statuses[device["stack"]]
             if not status.get("success") or (status.get("state") == "error" and not status.get("services")):
                 device["state"] = "unknown"
+            elif status.get("state") == "removing":
+                # Its containers are still stopping (stack-controller's remove)
+                device["state"] = "removing"
             else:
                 # Swarm names services <stack name>_<service>
                 states = [s["state"] for s in status.get("services", []) if s["name"].endswith("_" + device["service"])]
@@ -1092,6 +1095,15 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
         loggers.log_system_logger(f"Failed to remove '{name}' stack: {err}", True)
         await broadcast_message(misc_manager, f"Failed to remove '{name}' stack: {err}", "error")
         # Session/backup still proceed below either way -- surfaced as an error, not fatal.
+
+    # Removed, but some containers hadn't stopped yet (or Docker couldn't be
+    # asked): a start right now could overlap them
+    for name, result in remove_results.items():
+        if result.get("success") and result.get("teardown_confirmed") is False:
+            still = ", ".join(result.get("still_running") or []) or "couldn't check"
+            msg = f"'{name}' stack removed, but its containers may still be stopping ({still})"
+            loggers.log_event(msg, category="session", level=logging.WARNING, session_id=session_id)
+            await broadcast_message(misc_manager, msg, "error")
 
     # With the DB down nothing can flush, so don't wait out the drain timeout
     db_up = app.state.db is not None and health.components["db"]["status"] != "down"

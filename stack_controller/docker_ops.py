@@ -19,6 +19,37 @@ def remove_stack(stack_name: str) -> subprocess.CompletedProcess:
     return subprocess.run(["docker", "stack", "rm", stack_name], capture_output=True, text=True, timeout=60)
 
 
+# Task states in which a container may still exist on its node (still
+# starting, running or shutting down). Earlier states haven't got a container
+# yet and later ones are terminal.
+LIVE_TASK_STATES = {"assigned", "accepted", "preparing", "ready", "starting", "running"}
+
+
+# The stack's tasks whose containers may still be up, as "<task name>@<node>".
+# `docker stack rm` returns once the services are deleted; the containers on
+# the nodes stop a few seconds later, and until then a redeploy would run two
+# copies of a device (same MQTT client id, same IMU socket). Tasks on nodes
+# that aren't Ready are left out: they can't be waited for. Raises if Docker
+# can't be reached.
+def live_tasks(stack_name: str) -> list[str]:
+    client = docker.from_env()
+    try:
+        nodes = {n["ID"]: n for n in client.api.nodes()}
+        tasks = client.api.tasks(filters={"label": f"com.docker.stack.namespace={stack_name}"})
+    finally:
+        client.close()
+
+    live = []
+    for task in tasks:
+        node = nodes.get(task.get("NodeID") or "")
+        if not node or node.get("Status", {}).get("State") != "ready":
+            continue
+        if task.get("Status", {}).get("State") in LIVE_TASK_STATES:
+            name = task.get("Annotations", {}).get("Name") or task.get("ID", "?")[:12]
+            live.append(f"{name}@{node.get('Description', {}).get('Hostname', node['ID'][:12])}")
+    return sorted(live)
+
+
 # Rolls up per-service task state for a stack into one of:
 # not_deployed / deploying / running / removing / error
 def get_stack_status(stack_name: str) -> dict:

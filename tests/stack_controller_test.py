@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import patch
 
@@ -181,6 +182,98 @@ class StackControllerTests(unittest.TestCase):
 
         self.assertEqual(resp.status_code, 500)
         self.assertFalse(Path(paths[0]).exists())
+
+
+class RemoveWaitsForTeardownTests(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "edge.yml").write_text(COMPOSE)
+        (root / "stacks.yml").write_text(yaml.safe_dump({"stacks": {"edge": {
+            "compose_file": str(root / "edge.yml"), "stack_name": "edge"}}}))
+        self.patches = [
+            patch.dict(os.environ, {"STACK_CONTROLLER_TOKEN": "t"}),
+            patch.object(sc, "STACKS_CONFIG_PATH", str(root / "stacks.yml")),
+            patch.object(sc, "REMOVE_POLL_S", 0.01),
+            patch.object(sc.docker_ops, "remove_stack",
+                         return_value=subprocess.CompletedProcess([], 0, stdout="Removing service edge_imu-106", stderr="")),
+        ]
+        for p in self.patches:
+            p.start()
+        self.client = TestClient(sc.app)
+        self.headers = {"Authorization": "Bearer t"}
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        self.tmp.cleanup()
+
+    def test_returns_once_the_containers_are_gone(self):
+        polls = iter([["edge_imu-106.1@RPIIMUJ1"], ["edge_imu-106.1@RPIIMUJ1"], []])
+        statuses = []
+
+        def live_tasks(stack_name):
+            # Status asked mid-teardown says "removing", not "not_deployed"
+            statuses.append(self.client.get("/stacks/edge/status", headers=self.headers).json()["state"])
+            return next(polls)
+
+        with patch.object(sc.docker_ops, "live_tasks", side_effect=live_tasks) as live:
+            resp = self.client.post("/stacks/edge/remove", headers=self.headers)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["teardown_confirmed"])
+        self.assertIsNone(resp.json()["still_running"])
+        self.assertEqual(live.call_count, 3)
+        self.assertEqual(statuses, ["removing"] * 3)
+        self.assertNotIn("edge", sc._removing)
+
+    def test_gives_up_at_the_deadline_and_says_what_is_still_up(self):
+        with patch.object(sc, "REMOVE_WAIT_S", 0.05), \
+             patch.object(sc.docker_ops, "live_tasks", return_value=["edge_imu-106.1@RPIIMUJ1"]):
+            resp = self.client.post("/stacks/edge/remove", headers=self.headers)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["teardown_confirmed"])
+        self.assertEqual(resp.json()["still_running"], ["edge_imu-106.1@RPIIMUJ1"])
+
+    def test_docker_unreachable_is_unconfirmed_not_an_error(self):
+        with patch.object(sc.docker_ops, "live_tasks", side_effect=RuntimeError("no docker")):
+            resp = self.client.post("/stacks/edge/remove", headers=self.headers)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["teardown_confirmed"])
+
+    def test_failed_rm_is_an_error_and_clears_removing(self):
+        with patch.object(sc.docker_ops, "remove_stack",
+                          return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="boom")):
+            resp = self.client.post("/stacks/edge/remove", headers=self.headers)
+
+        self.assertEqual(resp.status_code, 500)
+        self.assertNotIn("edge", sc._removing)
+
+
+class LiveTasksTests(unittest.TestCase):
+
+    def test_only_containers_that_may_still_be_up_on_ready_nodes(self):
+        nodes = [
+            {"ID": "n1", "Status": {"State": "ready"}, "Description": {"Hostname": "RPIIMUJ1"}},
+            {"ID": "n2", "Status": {"State": "down"}, "Description": {"Hostname": "RPI-IMU-BENCH"}},
+        ]
+        tasks = [
+            {"ID": "a", "NodeID": "n1", "Annotations": {"Name": "edge_imu-106.1"}, "Status": {"State": "running"}},
+            {"ID": "b", "NodeID": "n1", "Annotations": {"Name": "edge_imu-106.2"}, "Status": {"State": "shutdown"}},
+            {"ID": "c", "NodeID": "n2", "Annotations": {"Name": "edge_imu-111.1"}, "Status": {"State": "running"}},
+            {"ID": "d", "NodeID": "", "Status": {"State": "pending"}},
+        ]
+        client = unittest.mock.MagicMock()
+        client.api.nodes.return_value = nodes
+        client.api.tasks.return_value = tasks
+
+        with patch.object(sc.docker_ops.docker, "from_env", return_value=client):
+            self.assertEqual(sc.docker_ops.live_tasks("edge"), ["edge_imu-106.1@RPIIMUJ1"])
+
+        client.api.tasks.assert_called_once_with(filters={"label": "com.docker.stack.namespace=edge"})
 
 
 if __name__ == "__main__":
