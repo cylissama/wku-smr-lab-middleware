@@ -32,7 +32,7 @@ The IMU edge nodes read the same PLC. With `IMU_PLC_TRIGGER=true`, an IMU waits 
 | **Monitoring** with a [simulated PLC](#monitoring-with-a-simulated-plc) | `true` | wait for the simulated PLC's `Data_Start` |
 | **Recording** (session) | `true` | wait for the robot's `Data_Start` |
 
-Going from monitoring to a session redeploys the edge stack. Only the IMU services restart, because nothing else changed; the cameras keep running. Start the robot only after the IMUs are back up: an IMU ignores a `Data_Start` that arrived before it started.
+Going from monitoring to a session redeploys the edge stack. Only the IMU services restart, because nothing else changed; the cameras keep running. Start the robot only after the dashboard's "Edge ready" banner turns green: an IMU ignores a `Data_Start` that arrived before it started.
 
 To record without the robot (IMUs streaming as soon as the session starts), set `IMU_PLC_TRIGGER_ON_RECORD=false` in the repo-root `.env` (the broker stack's, not `deploy/.env`) and recreate `fastapi-app`. Then starting a session from monitoring with the same devices doesn't redeploy anything.
 

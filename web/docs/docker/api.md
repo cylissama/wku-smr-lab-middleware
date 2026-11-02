@@ -8,7 +8,7 @@ Most routes answer `200` with `{"success": true, …}` or `{"success": false, "e
 
 | Method & path | What it does | Needs DB |
 | --- | --- | --- |
-| `GET /capture` | Current [capture mode](/overview/capture-modes), session id and device selection | no |
+| `GET /capture` | Current [capture mode](/overview/capture-modes), session id and device selection, plus `busy` (a start/stop/redeploy is in progress) and `edge` ([edge readiness](/overview/capture-modes#edge-readiness)) | no |
 | `POST /listen/start` | Start monitor mode. Body `{"devices": [...]}` or `null` for all. Only from idle. | no |
 | `POST /listen/stop` | Stop monitor mode and remove the edge stack | no |
 | `GET /session/start/{label}?session_label=…&is_test_session=…&devices=…` | Start a recording session. `devices` is repeated per key; leave it out for all devices. | yes |

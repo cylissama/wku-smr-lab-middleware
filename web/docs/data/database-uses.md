@@ -39,7 +39,7 @@ These return a whole session at once; for analysis, query the database directly 
 
 ## Backup and restore
 
-- `db.create_backup()` runs `pg_dump -F c` into the NFS-mounted `/db_backups` volume (backed by the Synology NAS), named `<db>_<UTC timestamp>.dump`. This runs automatically on every `session/stop`, and can also be triggered directly via `GET /backup`.
+- `db.create_backup()` runs `pg_dump -F c` into the NFS-mounted `/db_backups` volume (backed by the Synology NAS), named `<db>_<UTC timestamp>.dump`. This runs automatically (in the background) after every session stop, and can also be triggered directly via `GET /backup`, which is refused while an automatic one is running.
 - `GET /backup/list` lists available `.dump` files.
 - `POST /backup/restore/{filename}` is destructive: it terminates all other connections to the database, drops it, recreates it, and runs `pg_restore` from the chosen dump — then reconnects the pool and clears all in-memory caches (devices, session history, current session).
 
