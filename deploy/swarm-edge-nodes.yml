@@ -15,11 +15,12 @@
 # device it runs, matching its MQTT topic (<category>/<device>). stack-controller
 # reads them for the dashboard's device picker (GET /stacks/edge/services).
 #
-# Healthchecks run every 10s: Swarm shows a task as "starting" until its first
-# check passes, and the first check only runs after one interval, so this sets
-# how soon the dashboard sees a device as running. start_period is the warm-up
-# during which failed checks don't count (cameras take longer to come up).
-# start_interval would be faster still but needs Docker 25+ on every node.
+# Swarm shows a task as "starting" until its first healthcheck passes, and the
+# dashboard's "edge ready" time is when that happened, so checks run every 1s
+# (start_interval) during start_period, then every 10s. start_period is also
+# the warm-up during which failed checks don't count (cameras take longer to
+# come up). A node older than Docker 25 (RPIIMUJ3 runs 20.10) ignores
+# start_interval and checks every 10s, so its device shows ready up to 10s late.
 
 services:
 
@@ -76,6 +77,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+      start_interval: 1s
 
   imu-107:
     image: smart-mfg-imu:latest
@@ -128,6 +130,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+      start_interval: 1s
 
   imu-108:
     image: smart-mfg-imu:latest
@@ -180,6 +183,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+      start_interval: 1s
 
   imu-109:
     image: smart-mfg-imu:latest
@@ -232,6 +236,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+      start_interval: 1s
 
   imu-110:
     image: smart-mfg-imu:latest
@@ -284,6 +289,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+      start_interval: 1s
 
   imu-111:
     image: smart-mfg-imu:latest
@@ -336,6 +342,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+      start_interval: 1s
 
   # --- Camera edge nodes (pinned by node.labels.camera) ---
 
@@ -389,6 +396,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+      start_interval: 1s
 
 
   camera-side:
@@ -439,3 +447,4 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+      start_interval: 1s
