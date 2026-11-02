@@ -254,22 +254,35 @@ REAL_PLC_REFUSAL = f"{REAL_PLC_IP} is the real cell PLC: monitoring can't use it
 
 # The backup a session stop starts in the background (see start_stop_backup)
 backup_task: asyncio.Task | None = None
+# A session ended while that backup was running, so it needs one more after it
+backup_requested = False
 
 def backup_running() -> bool:
     return backup_task is not None and not backup_task.done()
 
 BACKUP_BUSY = {"success": False, "error": "A backup is already running, try again when it finishes"}
 
+# Backs up until no session has ended since the last backup started, so a
+# session that ends during a backup is still covered by the next one
+async def run_stop_backups() -> None:
+    global backup_requested
+    while True:
+        await try_backup()
+        if not backup_requested:
+            return
+        backup_requested = False
+
 # Starts the end-of-session backup without waiting for it, so a stop doesn't
 # hold session_lock through ~20 s of pg_dump (which made a Start right after a
 # stop hang). Its result reaches the dashboard via /ws/misc and the logs.
 def start_stop_backup() -> dict[str, Any]:
-    global backup_task
+    global backup_task, backup_requested
     if backup_running():
-        loggers.log_event("Skipped the end-of-session backup: the previous one is still running",
-                          category="backup", level=logging.WARNING)
-        return {**BACKUP_BUSY, "skipped": True}
-    backup_task = start_background(try_backup())
+        backup_requested = True
+        loggers.log_event("A backup is already running: another will follow it to include this session",
+                          category="backup")
+        return {"success": True, "queued": True}
+    backup_task = start_background(run_stop_backups())
     return {"success": True, "started": True}
 
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not

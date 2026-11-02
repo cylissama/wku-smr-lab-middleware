@@ -136,6 +136,7 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
             patch("fast_server.main.session_lock", asyncio.Lock()),
             patch("fast_server.main.last_stop", None),
             patch("fast_server.main.backup_task", None),
+            patch("fast_server.main.backup_requested", False),
         ]
         for p in self.patches:
             p.start()
@@ -250,7 +251,7 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         await m.backup_task
         self.assertFalse(m.backup_running())
 
-    async def test_stop_while_a_backup_runs_skips_the_second_backup(self):
+    async def test_stop_while_a_backup_runs_queues_one_more_backup(self):
         release = asyncio.Event()
 
         async def slow_backup():
@@ -261,14 +262,16 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
 
         m.capture.set(CaptureMode.RECORD, session_id=13)
         await m.stop_session_from_plc()
-        m.capture.set(CaptureMode.RECORD, session_id=14)
-        result = await m.stop_session_from_plc()
+        for sid in (14, 15):
+            m.capture.set(CaptureMode.RECORD, session_id=sid)
+            result = await m.stop_session_from_plc()
+            self.assertTrue(result["backup"]["queued"])
 
-        self.assertTrue(result["success"])
-        self.assertTrue(result["backup"]["skipped"])
         release.set()
         await m.backup_task
-        m.try_backup.assert_awaited_once()
+        # One backup for 13, then one covering both 14 and 15
+        self.assertEqual(m.try_backup.await_count, 2)
+        self.assertFalse(m.backup_running())
 
     async def test_manual_backup_and_restore_refused_while_a_backup_runs(self):
         release = asyncio.Event()
