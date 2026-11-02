@@ -580,7 +580,8 @@ async def call_stack_controller(action: str, stack: str, services: list[str] | N
 # env is passed through to every deploy (see stack_env()).
 async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None,
                                 env: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
-    global deployed_env
+    global deployed_env, deploy_started_at
+    deploy_started_at = time.time()
 
     async def deploy_one(stack: str) -> dict[str, Any]:
         services = plan.get(stack) if plan is not None else None
@@ -647,6 +648,20 @@ class DeviceSelection(BaseModel):
     # Device keys like "imu/106"; omit (null) for every device
     devices: list[str] | None = None
 
+# One edge device's state from its stack's GET /stacks/{name}/status: state,
+# plus since (unix s its container turned healthy) and error if there are any
+def device_swarm_state(status: dict[str, Any], service: str) -> dict[str, Any]:
+    if not status.get("success") or (status.get("state") == "error" and not status.get("services")):
+        return {"state": "unknown"}
+    if status.get("state") == "removing":
+        # Its containers are still stopping (stack-controller's remove)
+        return {"state": "removing"}
+    # Swarm names services <stack name>_<service>
+    for svc in status.get("services", []):
+        if svc["name"].endswith("_" + service):
+            return {"state": svc["state"], "since": svc.get("since"), "error": svc.get("error")}
+    return {"state": "not_deployed"}
+
 # API to list selectable devices with their current state, for the dashboard
 @app.get("/devices")
 async def get_devices() -> dict[str, Any]:
@@ -669,22 +684,112 @@ async def get_devices() -> dict[str, Any]:
             device.update(robot_status.get("activity") or {"receiving": False, "rate": None, "last_seen_s": None})
 
         if device["stack"]:
-            status = statuses[device["stack"]]
-            if not status.get("success") or (status.get("state") == "error" and not status.get("services")):
-                device["state"] = "unknown"
-            elif status.get("state") == "removing":
-                # Its containers are still stopping (stack-controller's remove)
-                device["state"] = "removing"
-            else:
-                # Swarm names services <stack name>_<service>
-                states = [s["state"] for s in status.get("services", []) if s["name"].endswith("_" + device["service"])]
-                device["state"] = states[0] if states else "not_deployed"
+            device.update(device_swarm_state(statuses[device["stack"]], device["service"]))
         elif "error" in robot_status:
             device["state"] = "unknown"
         else:
             device["state"] = "connected" if robot_status.get("connections", 0) > 0 else "not_connected"
 
     return {"data": catalog, "selected": capture.to_dict()["devices"], "success": True}
+
+# --- Edge readiness ---------------------------------------------------------
+# When every selected edge device's container is healthy after a deploy (or a
+# switch to recording), to the second. "Healthy" is Swarm seeing the device's
+# healthcheck pass (checked every 1 s while it starts, see
+# deploy/swarm-edge-nodes.yml); the edge agents don't yet say when they're
+# armed for the PLC's Data_Start. The robot isn't an edge device: not included.
+EDGE_READY_POLL_S = float(os.getenv("EDGE_READY_POLL_S", 1))
+EDGE_READY_TIMEOUT_S = float(os.getenv("EDGE_READY_TIMEOUT_S", 120))
+
+# When the last deploy_managed_stacks() started (unix s)
+deploy_started_at: float | None = None
+# Served in GET /capture as "edge"
+edge_ready: dict[str, Any] = {"state": "idle"}
+
+# Readiness of these devices ({key, state, since}) for a listening period that
+# began at started (unix s). ready_at is when the last one turned healthy, or
+# started if they all already were (e.g. monitoring -> recording, no redeploy).
+# Devices Swarm can't place (node down) don't hold it up; they're listed.
+def summarize_edge(devices: list[dict[str, Any]], started: float) -> dict[str, Any]:
+    waiting = sorted(d["key"] for d in devices if d["state"] not in ("running", "unavailable"))
+    unavailable = sorted(d["key"] for d in devices if d["state"] == "unavailable")
+    healthy = {d["key"]: max(d.get("since") or started, started) for d in devices if d["state"] == "running"}
+
+    summary = {"state": "waiting" if waiting else "ready", "started_at": started, "ready_at": None,
+               "last": None, "waiting_for": waiting, "unavailable": unavailable, "healthy_at": healthy}
+    if not waiting:
+        summary["last"] = max(healthy, key=healthy.get, default=None)
+        summary["ready_at"] = healthy[summary["last"]] if summary["last"] else started
+    return summary
+
+# The selected edge devices' Swarm states, from one status call per stack
+async def edge_device_states(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected = [d for d in catalog if d["stack"] and (capture.devices is None or d["key"] in capture.devices)]
+    statuses = dict(zip(MANAGED_STACKS, await asyncio.gather(
+        *(stack_controller_request("GET", f"/stacks/{s}/status") for s in MANAGED_STACKS))))
+    return [{"key": d["key"], **device_swarm_state(statuses[d["stack"]], d["service"])} for d in selected]
+
+def format_clock(ts: float) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(ts)) + f".{int(ts % 1 * 1000):03d} {time.strftime('%Z', time.localtime(ts))}"
+
+# Every EDGE_READY_POLL_S while monitoring/recording: updates edge_ready, and
+# announces (log + /ws/misc) the moment all selected edge devices are healthy,
+# once per listening period. A new period starts on any capture change (e.g.
+# monitoring -> recording) or redeploy.
+async def edge_ready_monitor() -> None:
+    global edge_ready
+    period, catalog, announced, timeout_warned = None, None, False, False
+
+    while True:
+        await asyncio.sleep(EDGE_READY_POLL_S)
+
+        if not capture.is_listening():
+            edge_ready, period = {"state": "idle"}, None
+            continue
+
+        # A start/redeploy in progress: the services may not have their new
+        # spec yet, so the old containers would look ready
+        if session_lock.locked():
+            edge_ready = {"state": "busy"}
+            continue
+
+        # capture.version is (about) the wall-clock ms of the last capture change
+        started = max(capture.version / 1000, deploy_started_at or 0)
+        if period != (capture.version, deploy_started_at):
+            period, catalog, announced, timeout_warned = (capture.version, deploy_started_at), None, False, False
+
+        try:
+            catalog = catalog or await load_device_catalog()
+            summary = summarize_edge(await edge_device_states(catalog), started)
+        except Exception as e:
+            edge_ready = {"state": "unknown", "error": describe_exc(e), "started_at": started}
+            continue
+
+        summary["mode"] = capture.mode.value
+        edge_ready = summary
+
+        if summary["state"] == "ready" and not announced:
+            announced = True
+            if not summary["healthy_at"]:
+                continue  # no edge devices selected (robot only)
+            after = summary["ready_at"] - started
+            n = len(summary["healthy_at"])
+            msg = f"Edge ready: {n} edge device(s) healthy at {format_clock(summary['ready_at'])}, {after:.1f} s after the start"
+            if summary["last"]:
+                msg += f" (last: {summary['last']})"
+            if summary["unavailable"]:
+                msg += f"; not placed (node down?): {', '.join(summary['unavailable'])}"
+            if capture.mode == CaptureMode.RECORD:
+                msg += " -- the robot can start"
+            loggers.log_event(msg, category="session", session_id=capture.session_id,
+                              ready_at=summary["ready_at"], healthy_at=summary["healthy_at"])
+            await broadcast_message(misc_manager, msg, "info")
+        elif summary["state"] == "waiting" and not timeout_warned and time.time() - started > EDGE_READY_TIMEOUT_S:
+            timeout_warned = True
+            msg = (f"Edge still not ready {EDGE_READY_TIMEOUT_S:.0f} s after the start: "
+                   f"waiting for {', '.join(summary['waiting_for'])}")
+            loggers.log_event(msg, category="session", level=logging.WARNING, session_id=capture.session_id)
+            await broadcast_message(misc_manager, msg, "error")
 
 # Removes every stack in MANAGED_STACKS, returns {stack_name: result}
 async def remove_managed_stacks() -> dict[str, dict[str, Any]]:
@@ -722,7 +827,8 @@ async def set_capture(mode: CaptureMode, session_id: int | None = None, devices:
 # API to get the current capture state -- tcp_server re-syncs from this
 @app.get("/capture")
 async def get_capture() -> dict[str, Any]:
-    return capture.to_dict()
+    # busy: a start/stop/redeploy holds session_lock, so another would wait
+    return {**capture.to_dict(), "busy": session_lock.locked(), "edge": edge_ready}
 
 # Each run parameter's default: deploy/.env's value for the edge ones (via
 # stack-controller; None if it can't be read), this process's env for the other
@@ -1042,7 +1148,7 @@ async def _start_session(
             selected is None or any(key.startswith("imu/") for key in selected)
         ):
             await broadcast_message(misc_manager, "IMUs are (re)starting to wait for the robot's PLC Data_Start -- "
-                                                  "start the robot once they show as running", "info")
+                                                  "start the robot after the \"Edge ready\" message", "info")
 
         return {
             "message": f"Session started with label: {label}",
@@ -1296,6 +1402,7 @@ async def startup():
     if PLC_AUTO_STOP:
         start_plc_listener()
     start_background(health_monitor())
+    start_background(run_forever("edge_ready_monitor", edge_ready_monitor))
 
 # Connects to the DB, retrying with backoff until it works, then resumes an
 # open session and starts the IMU/camera workers. Later outages are spotted by
