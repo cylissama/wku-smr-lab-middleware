@@ -25,6 +25,7 @@ const STATE_STYLES = {
     deploying: { tone: "blue", text: "starting", caption: "STARTING" },
     removing: { tone: "blue", text: "stopping", caption: "STOPPING" },
     error: { tone: "red", text: "error", caption: "FAULT" },
+    unavailable: { tone: "grey", text: "can't be placed (node down?)", caption: "NO NODE" },
     unknown: { tone: "red", text: "unknown", caption: "NO STATUS" },
     not_deployed: { tone: "grey", text: "not deployed", caption: "OFFLINE" },
     not_connected: { tone: "grey", text: "not connected", caption: "OFFLINE" },
@@ -36,7 +37,9 @@ export function deviceVisualState(device, listening) {
     const base = STATE_STYLES[device.state] ?? STATE_STYLES.unknown;
     const isUp = device.state === "running" || device.state === "connected";
     const lastSeen = device.last_seen_s == null ? "never" : `${device.last_seen_s}s ago`;
-    const title = `${base.text} · last message ${lastSeen}`;
+    // since: when Swarm saw its healthcheck pass; error: why it isn't running
+    const healthySince = device.since ? ` since ${new Date(device.since * 1000).toLocaleTimeString([], { hour12: false })}` : "";
+    const title = `${base.text}${healthySince} · last message ${lastSeen}${device.error ? ` · ${device.error}` : ""}`;
 
     if (device.receiving) {
         const rate = device.rate ? Math.round(device.rate) : null;
