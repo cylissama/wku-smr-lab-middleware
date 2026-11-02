@@ -276,5 +276,47 @@ class LiveTasksTests(unittest.TestCase):
         client.api.tasks.assert_called_once_with(filters={"label": "com.docker.stack.namespace=edge"})
 
 
+class StackStatusTests(unittest.TestCase):
+
+    OLD_ENV = {"Image": "smart-mfg-imu:latest", "Env": ["IMU_PLC_TRIGGER=false"]}
+    NEW_ENV = {"Image": "smart-mfg-imu:latest", "Env": ["IMU_PLC_TRIGGER=true"]}
+
+    @staticmethod
+    def task(spec, desired, state, ts="2026-11-02T19:54:14.123456789Z"):
+        return {"DesiredState": desired, "Spec": {"ContainerSpec": spec},
+                "Status": {"State": state, "Timestamp": ts}}
+
+    def status(self, tasks, spec=NEW_ENV):
+        service = unittest.mock.MagicMock()
+        service.name = "edge_imu-106"
+        service.attrs = {"Spec": {"Mode": {"Replicated": {"Replicas": 1}}, "TaskTemplate": {"ContainerSpec": spec}}}
+        service.tasks.return_value = tasks
+        client = unittest.mock.MagicMock()
+        client.services.list.return_value = [service]
+        with patch.object(sc.docker_ops.docker, "from_env", return_value=client):
+            return sc.docker_ops.get_stack_status("edge")["services"][0]
+
+    def test_old_task_still_running_during_a_redeploy_is_not_ready(self):
+        # Swarm hasn't told the old task to stop yet, and the new one is starting
+        svc = self.status([self.task(self.OLD_ENV, "running", "running"),
+                           self.task(self.NEW_ENV, "running", "starting")])
+        self.assertEqual((svc["state"], svc["running"], svc["since"]), ("deploying", 0, None))
+
+    def test_old_task_shutting_down_is_not_ready(self):
+        svc = self.status([self.task(self.NEW_ENV, "shutdown", "running")])
+        self.assertEqual(svc["state"], "deploying")
+
+    def test_healthy_current_task_is_running_since_its_timestamp(self):
+        svc = self.status([self.task(self.OLD_ENV, "shutdown", "shutdown", "2026-11-02T19:50:00Z"),
+                           self.task(self.NEW_ENV, "running", "running", "2026-11-02T19:54:14.123456789Z")])
+        self.assertEqual((svc["state"], svc["running"]), ("running", 1))
+        self.assertAlmostEqual(svc["since"], 1793649254.123456, places=5)
+
+    def test_failed_task_with_nothing_running_is_an_error(self):
+        svc = self.status([self.task(self.NEW_ENV, "shutdown", "failed"),
+                           self.task(self.NEW_ENV, "running", "starting")])
+        self.assertEqual(svc["state"], "error")
+
+
 if __name__ == "__main__":
     unittest.main()
