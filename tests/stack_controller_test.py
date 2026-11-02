@@ -312,6 +312,16 @@ class StackStatusTests(unittest.TestCase):
         self.assertEqual((svc["state"], svc["running"]), ("running", 1))
         self.assertAlmostEqual(svc["since"], 1793649254.123456, places=5)
 
+    def test_task_with_no_node_to_run_on_is_unavailable(self):
+        task = self.task(self.NEW_ENV, "running", "pending")
+        task["Status"]["Err"] = "no suitable node (scheduling constraints not satisfied on 9 nodes)"
+        svc = self.status([task])
+        self.assertEqual(svc["state"], "unavailable")
+        self.assertIn("no suitable node", svc["error"])
+
+    def test_pending_task_without_an_error_is_still_deploying(self):
+        self.assertEqual(self.status([self.task(self.NEW_ENV, "running", "pending")])["state"], "deploying")
+
     def test_failed_task_with_nothing_running_is_an_error(self):
         svc = self.status([self.task(self.NEW_ENV, "shutdown", "failed"),
                            self.task(self.NEW_ENV, "running", "starting")])

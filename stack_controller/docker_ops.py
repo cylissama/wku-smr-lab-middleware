@@ -72,7 +72,8 @@ def _ts(value: str | None) -> float | None:
 
 
 # Rolls up per-service task state for a stack into one of:
-# not_deployed / deploying / running / removing / error
+# not_deployed / deploying / running / removing / error, and per service
+# also unavailable (Swarm can't place it)
 #
 # Only tasks of the current deploy count: during a redeploy the old task can
 # still be running (or not yet told to stop) for a moment, and counting it
@@ -113,9 +114,21 @@ def get_stack_status(stack_name: str) -> dict:
             running = [t for t in current if t.get("Status", {}).get("State") == "running"]
             failed = any(t.get("Status", {}).get("State") == "failed" for t in tasks)
 
+            # Swarm can't place it (its node is down or missing): it would
+            # stay "deploying" forever, so say so instead
+            unplaceable = [t for t in current
+                           if t.get("Status", {}).get("State") == "pending" and t.get("Status", {}).get("Err")]
+
             since = None
+            error = None
             if desired is not None and len(running) < desired:
-                svc_state = "error" if failed else "deploying"
+                if failed:
+                    svc_state = "error"
+                elif current and len(unplaceable) == len(current):
+                    svc_state = "unavailable"
+                    error = unplaceable[0]["Status"]["Err"]
+                else:
+                    svc_state = "deploying"
             elif not running and desired != 0:
                 svc_state = "deploying"
             else:
@@ -130,6 +143,7 @@ def get_stack_status(stack_name: str) -> dict:
                     "running": len(running),
                     "state": svc_state,
                     "since": since,
+                    "error": error,
                 }
             )
     except APIError as e:
