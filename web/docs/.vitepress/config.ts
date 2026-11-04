@@ -79,6 +79,7 @@ export default defineConfig({
         items: [
           { text: 'Expanding the system', link: '/expanding/' },
           { text: 'Bringing a node online', link: '/expanding/swarm-nodes' },
+          { text: 'Keeping the architecture current', link: '/expanding/architecture' },
         ],
       },
       {
@@ -103,5 +104,13 @@ export default defineConfig({
         ariaLabel: 'Data Dashboard',
       },
     ],
+  },
+  vue: {
+    template: {
+      compilerOptions: {
+        // <likec4-view> is the architecture site's web component (see theme/ArchitectureView.vue)
+        isCustomElement: (tag) => tag.startsWith('likec4-'),
+      },
+    },
   },
 })

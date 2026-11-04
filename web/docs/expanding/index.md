@@ -10,7 +10,8 @@ Where to start for each kind of addition.
 | A column or table | Hand-run SQL logged in `db/migrations.md`, then parsing and inserts | [Updating the schema](/data/schema-changes) |
 | A database user | `pgadmin/provision-users.sh` | [Accessing the database](/data/accessing-database#managing-accounts-admins) |
 | A whole new Swarm stack | An entry in `stack_controller/stacks.yml` and its name in `MANAGED_STACKS` on `fastapi-app` | [Stack controller](/docker/stack-controller#adding-or-changing-a-device) |
-| A container on the AMS host | A service in `docker-compose.yml` (and `docker-compose.local.yml`), with a health check and the `smr.monitor` label | below |
+| A container on the AMS host | A service in `docker-compose.yml` (and `docker-compose.local.yml`), with a health check, the `smr.monitor` label and an `smr.description` label; then run `python architecture/sync.py` | below |
+| A connection or flow on the architecture diagram | Edit `web/architecture/model/` or `views/flows.c4`, check with `npm run arch:check` | [Keeping the architecture current](/expanding/architecture) |
 | A document in the dashboard's Info library | Drop the file in `web/public/info/` and rebuild `web` | [Automations](/docker/automations#dashboard-document-library-generation) |
 
 ## Adding a container to the AMS stack
@@ -22,4 +23,5 @@ Follow the pattern of the existing services in `docker-compose.yml`:
 - Don't use `depends_on` to wait for the database or NAS. Services should start on their own and retry ([Health & logs](/docker/health-and-logs#starting-without-dependencies)).
 - Write logs to stdout as JSON records (`common/log_schema.py`) if it's Python; otherwise add a pattern to `stack_controller/log_normalize.py`.
 - Add the same service to `docker-compose.local.yml`, which is kept in sync by hand.
+- Describe it in an `smr.description` label, run `python architecture/sync.py` and add its connections to the architecture model ([Keeping the architecture current](/expanding/architecture#adding-removing-or-renaming-a-container)). `tests/architecture_test.py` fails until you do.
 - Document it in [Compose](/docker/compose#services).

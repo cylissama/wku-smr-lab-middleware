@@ -22,20 +22,37 @@ Only a *change* from 0 to 1 counts. If `Db_Stop` is already 1 when `fastapi-app`
 
 If someone clicks **Stop Session** right after the PLC stopped the session (the dashboard can lag up to 5 s), the click is answered with "Session N was already stopped" instead of an error.
 
-## IMU PLC trigger: monitor vs. session
+## PLC trigger: monitor vs. session {#imu-plc-trigger-monitor-vs-session}
 
-The IMU edge nodes read the same PLC. With `IMU_PLC_TRIGGER=true`, an IMU waits for a `Data_Start` pulse before sending, tares on `IMU_Tare`, and stops sending on `Db_Stop`. `fastapi-app` sets that variable on every edge deploy:
+The IMU and camera edge nodes read the same PLC. With `IMU_PLC_TRIGGER=true`, an IMU waits for a `Data_Start` pulse before sending, tares on `IMU_Tare`, and stops sending on `Db_Stop`; with `CAMERA_PLC_TRIGGER=true`, a camera waits for `Data_Start` and stops on `Db_Stop`. `fastapi-app` sets both variables, to the same value, on every edge deploy:
 
-| Mode | `IMU_PLC_TRIGGER` | IMUs |
+| Mode | `IMU_PLC_TRIGGER` / `CAMERA_PLC_TRIGGER` | IMUs and cameras |
 | --- | --- | --- |
 | **Monitoring** | `false` | stream immediately, so you can check the devices without the robot |
+| **Monitoring** with a [simulated PLC](#monitoring-with-a-simulated-plc) | `true` | wait for the simulated PLC's `Data_Start` |
 | **Recording** (session) | `true` | wait for the robot's `Data_Start` |
 
-Going from monitoring to a session redeploys the edge stack. Only the IMU services restart, because nothing else changed; the cameras keep running. Start the robot only after the IMUs are back up: an IMU ignores a `Data_Start` that arrived before it started.
+Going from monitoring to a session redeploys the edge stack. The IMU and camera services restart, because their trigger changed. Start the robot only after the dashboard's "Edge ready" banner turns green: an IMU or camera ignores a `Data_Start` that arrived before it started.
 
-To record without the robot (IMUs streaming as soon as the session starts), set `IMU_PLC_TRIGGER_ON_RECORD=false` in the repo-root `.env` (the broker stack's, not `deploy/.env`) and recreate `fastapi-app`. Then starting a session from monitoring with the same devices doesn't redeploy anything.
+To record without the robot (IMUs and cameras streaming as soon as the session starts), turn off *Wait for PLC start* in the [Run Parameters](/operations/run-parameters) panel, or set `IMU_PLC_TRIGGER_ON_RECORD=false` in the repo-root `.env` (the broker stack's, not `deploy/.env`) and recreate `fastapi-app`. Then starting a session from monitoring with the same devices doesn't redeploy anything.
 
-How it gets there: stack-controller only lets a deploy request set the variables listed under `env_overrides` for the stack in `stack_controller/stacks.yml` (`IMU_PLC_TRIGGER` for `edge`). They are layered over `deploy/.env` for that deploy only, and anything else is refused with a 400. The `IMU_PLC_TRIGGER` line in `deploy/.env` only applies to a manual `docker stack deploy`. See [Two `.env` files](/docker/compose#two-env-files).
+How it gets there: stack-controller only lets a deploy request set the variables listed under `env_overrides` for the stack in `stack_controller/stacks.yml` (`IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER`, among others, for `edge`). They are layered over `deploy/.env` for that deploy only, and anything else is refused with a 400. The `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` lines in `deploy/.env` only apply to a manual `docker stack deploy`. See [Two `.env` files](/docker/compose#two-env-files).
+
+## Monitoring with a simulated PLC
+
+A Raspberry Pi can stand in for the cell PLC, serving `Data_Start`, `IMU_Tare` and `Db_Stop`. Enter its IP as **Simulated PLC IP** in the [Run Parameters](/operations/run-parameters) panel (PLC group) and click Apply:
+
+| Simulated PLC IP | Start Monitoring |
+| --- | --- |
+| empty or `0` | as above: the devices stream right away |
+| the Pi's IP | IMUs and cameras wait for its `Data_Start`, tare on `IMU_Tare`, stop on `Db_Stop`, then wait for the next `Data_Start` |
+| `192.168.1.103` (the real PLC) | refused: monitoring can't use the real PLC |
+
+The deploy then sets `IMU_PLC_TRIGGER=true`, `IMU_PLC_PATH`, `CAMERA_PLC_TRIGGER=true` and `CAMERA_PLC_PATH` (all in `env_overrides`). Changing the IP while monitoring redeploys right away.
+
+It only affects monitoring. A recording session always uses the real PLC from the `.env` files (`IMU_PLC_PATH`/`CAMERA_PLC_PATH` defaults, and `PLC_PATH` for auto stop), so going from monitoring to a session redeploys back onto it. The simulated IP isn't stored in `session.parameters`.
+
+The real PLC's address is `REAL_PLC_IP` in the repo-root `.env`, which defaults to the host part of `PLC_PATH`. The IMUs only wait if their image has the PLC trigger (`plc_update`) change; without it they stream right away.
 
 ## Checking it
 

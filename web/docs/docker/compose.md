@@ -30,9 +30,9 @@ There are two `.env` files on the AMS host. They configure different stacks, are
 | Configures | the always-on stack: `fastapi-app`, `tcp`, `web`, `stack-controller`, `pgadmin` | the IMU and camera services on the Pis |
 | Read by | `docker compose` (`env_file` / `${VAR}`) | `stack-controller` on every edge deploy (mounted at `/stacks/.env`), or your shell for a manual `docker stack deploy` |
 | Takes effect | after recreating the container (`docker compose up -d --force-recreate <service>`) | on the next deploy (Start Monitoring / Start Session); nothing to restart |
-| Examples | `DB_*`, ports, `BATCHES`, `PLC_AUTO_STOP`, `IMU_PLC_TRIGGER_ON_RECORD`, `STACK_CONTROLLER_TOKEN` | `IMU_10x_DEVICE_ID`, `IMU_SAMPLE_HZ`, `CAMERA_*`, `MQTT_BROKER_IP`, `IMU_PLC_TRIGGER` |
+| Examples | `DB_*`, ports, `BATCHES`, `PLC_AUTO_STOP`, `IMU_PLC_TRIGGER_ON_RECORD`, `STACK_CONTROLLER_TOKEN` | `IMU_10x_DEVICE_ID`, `IMU_SAMPLE_HZ`, `CAMERA_*`, `MQTT_BROKER_IP`, `IMU_PLC_TRIGGER`, `CAMERA_PLC_TRIGGER` |
 
-The PLC trigger is the easy one to mix up. Whether a session waits for the PLC is set by `IMU_PLC_TRIGGER_ON_RECORD` in the **root** `.env`. fastapi-app uses it to choose the `IMU_PLC_TRIGGER` value it sends with each edge deploy, and that value replaces the `IMU_PLC_TRIGGER` line in `deploy/.env`. So editing `IMU_PLC_TRIGGER` in `deploy/.env` changes nothing for monitoring or sessions; it only applies to a manual `docker stack deploy`. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
+The PLC trigger is the easy one to mix up. Whether a session waits for the PLC is set by `IMU_PLC_TRIGGER_ON_RECORD` in the **root** `.env`. fastapi-app uses it to choose the `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` values it sends with each edge deploy, and those values replace the matching lines in `deploy/.env`. So editing `IMU_PLC_TRIGGER` or `CAMERA_PLC_TRIGGER` in `deploy/.env` changes nothing for monitoring or sessions; it only applies to a manual `docker stack deploy`. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
 Some edge values (`IMU_SAMPLE_HZ`, `IMU_PLC_MAX_RUN_S`, and `IMU_PLC_TRIGGER_ON_RECORD` from the root file) are only **defaults** now: the dashboard's [Run Parameters](/operations/run-parameters) panel can override them per run, and those overrides win over the `.env` line.
 

@@ -2,6 +2,20 @@
 
 Where work stands, so the next session can pick up. Newest first. Detailed design and as-built notes live in each plan file; this is only the handoff.
 
+## 2026-10-27 (evening): phase 3
+
+### Interactive architecture diagram (`plans/interactive-architecture-plan.md`)
+
+**Status:** phases 1 and 2 merged to `main` (PR #8) and live. Phase 3 built and committed on branch `dev/architecture-flows` (from `main`, not pushed); the `web` image is built but **not yet recreated**. Rollback image `wku-smr-lab-middleware-web:pre-arch-flows`. **Next: the user recreates `web`, then phase 4.**
+
+- Commits: twin/AI as `#wip` and camera host as `#placeholder`; flow views (`views/flows.c4`); embeds in `structure.md` (PNGs deleted); the "Keeping the architecture current" page. As-built notes in the plan's "Phase 3 notes".
+- Deploy: `docker compose up -d --no-deps web` (only `web` changed; labels didn't change this time).
+- Checked: `likec4 validate` clean, `tests.architecture_test` OK, docs build clean, embeds render from the built image in light and dark (Playwright screenshots).
+
+**Phase 4 to do** (freshness): `reviewed`/`paths`/`repo` metadata on hand-written elements; `sync.py --status` writing `generated/status.c4` with `#changed-since-review`; amber style + "Needs review" view. Done when touching `fast_server/plc_listener.py` after its `reviewed` date flags the PLC watcher.
+
+**Still open for the user:** what the image analysis machine is and who owns it; the IMU sensor model; which machines sync from the `ntp` container. (Camera host details are placeholders by the user's choice; twin and AI are WIP.)
+
 ## 2026-10-27
 
 ### Interactive architecture diagram (`plans/interactive-architecture-plan.md`)
@@ -40,7 +54,7 @@ Where work stands, so the next session can pick up. Newest first. Detailed desig
 - Tests: `docker run --rm -v $PWD:/repo:ro -w /repo --entrypoint python smr-test -m unittest tests.architecture_test` (use `-p "*_test.py"` with `discover`; 15 failures in backup/parse/sessions/tcp tests predate this work)
 - Screenshots: `mcr.microsoft.com/playwright/python:v1.49.0-jammy` + `pip install playwright==1.49.0`, against the site served from a throwaway `web` container on port 18081
 
-### Uncommitted work in the tree (not part of the branch's commits)
+### Uncommitted work in the tree (not part of the branch's commits) — since committed by the user in `b018145` and merged
 
 - **Docs update** (`plans/docs-update.md`): rewritten and new pages under `web/docs/` (api, plc, capture-modes, dashboard, the troubleshooting additions, …), plus `plans/` moves into `completed/` and path fixes in `CLAUDE.md`, `common/log_schema.py`, `fast_server/health.py`, `stack_controller/containers.py`. Finished and deployed in the web image, **waiting for the user's OK to commit**. Its open TODOs are marked `::: info Placeholder` in the pages.
 - **Camera PLC trigger env** (`CAMERA_PLC_*`) in `deploy/swarm-edge-nodes.yml`: the user's own edit. Leave it alone unless asked.

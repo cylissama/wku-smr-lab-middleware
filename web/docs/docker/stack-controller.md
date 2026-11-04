@@ -53,7 +53,7 @@ There are three separate questions, answered in three different places:
  Raspberry Pis (Swarm workers)
      RPIIMUJ1 runs edge_imu-106  ──MQTT imu/106──►  mosquitto ──► fastapi-app
      RPiCamFront runs edge_camera-front ──MQTT camera/113_front──► ...
-     (RPIIMUJ2..5, CameraPi2: nothing scheduled)
+     (RPIIMUJ2..5, CameraPi2, RPICAM3: nothing scheduled)
 ```
 
 ## Device keys: one name for a device everywhere
@@ -139,7 +139,7 @@ Response:
 {"key": "robot/main", "category": "robot", "device_label": "main", "stack": null, "service": null, ...}
 ```
 
-`GET /devices` then adds live status to each entry (see [Status indicators](#status-indicators)) and returns the list plus the currently captured selection. The dashboard calls it on load and then every **3 s** while monitoring or recording, every **10 s** when idle.
+`GET /devices` then adds live status to each entry (see [Status indicators](#status-indicators)) and its `db_id` (the `device.id` row with that `device_label`, `null` if none yet; read from the database at most every `DEVICE_ID_REFRESH_S`, default 30 s, and left out quietly while the database is down), and returns the list plus the currently captured selection. The dashboard calls it on load and then every **3 s** while monitoring or recording, every **10 s** when idle.
 
 ## Step 2 — The selection leaves the browser
 
@@ -199,7 +199,7 @@ Then, in order:
 | a list of services | `POST /stacks/edge/deploy` with `{"services": [...], "env": {...}}` |
 | an **empty** list (e.g. robot-only run) | `POST /stacks/edge/remove` → the whole stack is taken down, since none of it should run |
 
-`env` holds the **per-deploy settings** from `stack_env(mode)`: `IMU_PLC_TRIGGER` (`false` when monitoring; for a session, from the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD`), plus any edge [run parameters](/operations/run-parameters) changed from their `deploy/.env` default (e.g. `IMU_SAMPLE_HZ`).
+`env` holds the **per-deploy settings** from `stack_env(mode)`: `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` (`false` when monitoring; for a session, from the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD`), plus any edge [run parameters](/operations/run-parameters) changed from their `deploy/.env` default (e.g. `IMU_SAMPLE_HZ`).
 
 Every call goes through `stack_controller_request()`: an `aiohttp` request to `http://${STACK_CONTROLLER_HOST}:${STACK_CONTROLLER_PORT}` (defaults `stack-controller:8080`) with header `Authorization: Bearer ${STACK_CONTROLLER_TOKEN}`. It never raises — failures come back as `{"success": false, "error": "..."}` and are logged to the system logger.
 
@@ -239,7 +239,8 @@ stacks:
     env_file: /stacks/.env
     stack_name: edge
     deploy_flags: ["--resolve-image", "never"]
-    env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S]
+    env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S,
+                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH]
 ```
 
 The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name` is the Swarm stack namespace (services become `edge_<service>`). `--resolve-image never` makes Swarm use the image tags already present on each Pi instead of contacting a registry. `env_overrides` lists the only variables a deploy request may set in its `env`; anything else gets `400`. This keeps `fastapi-app` from changing hostnames, broker addresses or other infrastructure values. The file is re-read on every request — but it's a single-file bind mount, so if an editor *replaces* the file instead of editing it in place, the container keeps seeing the old copy until `stack-controller` is restarted.
@@ -256,8 +257,8 @@ The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name`
 | `GET /stacks/{name}/services` | the device catalog for that stack (see Step 1) |
 | `GET /stacks/{name}/env` | the `env_file` values of the `env_overrides` variables only, which are the defaults shown in the Run Parameters panel |
 | `POST /stacks/{name}/deploy` | deploy the whole stack, or only `{"services": [...]}` |
-| `POST /stacks/{name}/remove` | `docker stack rm <stack_name>` |
-| `GET /stacks/{name}/status` | per-service running/desired counts, rolled up into a state |
+| `POST /stacks/{name}/remove` | `docker stack rm <stack_name>`, then waits until its containers have stopped |
+| `GET /stacks/{name}/status` | per-service state, running/desired counts and `since` (when it turned healthy), rolled up into a state; `removing` while a remove runs |
 
 Deploy and remove take a **per-stack lock**: a second deploy/remove for the same stack while one is running gets `409 Conflict` instead of queueing behind it.
 
@@ -282,14 +283,25 @@ A deploy with **no body** is the same minus steps 1, 3 and 5: the original `/sta
 
 ### Removing
 
-`POST /stacks/edge/remove` runs `docker stack rm edge` (60 s timeout). This returns as soon as Swarm accepts the removal; containers on the Pis shut down over the next few seconds. `stop_session` and `/listen/stop` call this, then `stop_session` waits for the ingestion queues to drain.
+`POST /stacks/edge/remove` runs `docker stack rm edge` (60 s timeout). That returns as soon as Swarm deletes the services, but the containers on the Pis take a few more seconds to stop (about 4 s on the lab Pis). So the remove then polls the stack's tasks (`docker_ops.live_tasks()`, every 0.5 s) until none is still up on a Ready node, for at most `REMOVE_WAIT_S` (30 s). Tasks on a node that's down are skipped, since they can't be waited for. The reply says `teardown_confirmed: true`, or `false` with `still_running` listing `task@node` if it gave up or couldn't ask Docker; the stack is removed either way, and `fastapi-app` shows a warning. While this runs, `GET /status` says `removing`. `stop_session` and `/listen/stop` call this, then `stop_session` waits for the ingestion queues to drain.
+
+### Status
+
+`GET /stacks/edge/status` returns one entry per service: `state`, `desired`, `running`, `since` and `error`. Only tasks of the current deploy count: Swarm must want them running and they must have the service's current image, env and command. During a redeploy the old task can still be running for a moment; counting it would call a device ready before its new container started.
+
+| Service state | Meaning |
+| --- | --- |
+| `running` | every replica's healthcheck has passed; `since` is when the last one did (unix s) |
+| `deploying` | still starting |
+| `unavailable` | Swarm can't place it (`error` is Swarm's, e.g. "no suitable node"), usually because its Pi is down |
+| `error` | a task failed and nothing is running |
 
 ## Step 5 — Swarm puts each service on its Pi
 
 Once `docker stack deploy` hands the service specs to the manager, Swarm takes over:
 
-- **Placement.** IMU services are pinned by hostname (`node.hostname == ${IMU_106_HOSTNAME}` → `RPIIMUJ1`, …); cameras by node label (`node.labels.camera == front` → `RPiCamFront`, `== side` → `CameraPi2`). A service whose constraint matches no node stays at `0/1` with "no suitable node" in `docker service ps`.
-- **Task lifecycle.** Each service gets one task (`replicas: 1`): `new → pending → assigned → accepted → preparing → starting → running`. Because every edge service has a **healthcheck**, Swarm keeps the task in *starting* until the first check passes. Checks run every **10 s** (`interval`), with a warm-up (`start_period`) of 15 s for IMUs and 30 s for cameras during which failures don't count. This is the delay you see as **starting** in the dashboard.
+- **Placement.** IMU services are pinned by hostname (`node.hostname == ${IMU_106_HOSTNAME}` → `RPIIMUJ1`, …); cameras by node label (`node.labels.camera == front` → `RPiCamFront`, `== side` → `CameraPi2`, `== cam3` → `RPICAM3`). A service whose constraint matches no node stays at `0/1` with "no suitable node" in `docker service ps`.
+- **Task lifecycle.** Each service gets one task (`replicas: 1`): `new → pending → assigned → accepted → preparing → starting → running`. Because every edge service has a **healthcheck**, Swarm keeps the task in *starting* until the first check passes. Checks run every **1 s** during the warm-up (`start_interval`, `start_period`: 15 s for IMUs, 30 s for cameras, during which failures don't count) and every **10 s** after (`interval`). This is the delay you see as **starting** in the dashboard. Docker older than 25 (`RPIIMUJ3`) ignores `start_interval` and checks every 10 s from the start.
 - **Restarts.** IMUs restart `on-failure`, cameras on `any` exit.
 
 Useful commands on the AMS host:

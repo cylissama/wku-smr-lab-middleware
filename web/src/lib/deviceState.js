@@ -25,6 +25,7 @@ const STATE_STYLES = {
     deploying: { tone: "blue", text: "starting", caption: "STARTING" },
     removing: { tone: "blue", text: "stopping", caption: "STOPPING" },
     error: { tone: "red", text: "error", caption: "FAULT" },
+    unavailable: { tone: "grey", text: "can't be placed (node down?)", caption: "NO NODE" },
     unknown: { tone: "red", text: "unknown", caption: "NO STATUS" },
     not_deployed: { tone: "grey", text: "not deployed", caption: "OFFLINE" },
     not_connected: { tone: "grey", text: "not connected", caption: "OFFLINE" },
@@ -36,7 +37,9 @@ export function deviceVisualState(device, listening) {
     const base = STATE_STYLES[device.state] ?? STATE_STYLES.unknown;
     const isUp = device.state === "running" || device.state === "connected";
     const lastSeen = device.last_seen_s == null ? "never" : `${device.last_seen_s}s ago`;
-    const title = `${base.text} · last message ${lastSeen}`;
+    // since: when Swarm saw its healthcheck pass; error: why it isn't running
+    const healthySince = device.since ? ` since ${new Date(device.since * 1000).toLocaleTimeString([], { hour12: false })}` : "";
+    const title = `${base.text}${healthySince} · last message ${lastSeen}${device.error ? ` · ${device.error}` : ""}`;
 
     if (device.receiving) {
         const rate = device.rate ? Math.round(device.rate) : null;
@@ -51,6 +54,14 @@ export function deviceVisualState(device, listening) {
         return { tone: "red", text: `${base.text} · no data`, caption: "NO DATA", title };
     }
     return { tone: base.tone, text: base.text, caption: base.caption, title };
+}
+
+// Its row id in the database's device table (what device_id in the data
+// tables refers to). A device has none until a session has stored its data.
+export function deviceDbId(device) {
+    return device.db_id == null
+        ? { text: "ID —", title: "Not in the database yet: it gets an ID the first time a session records it" }
+        : { text: `ID ${device.db_id}`, title: `device.id = ${device.db_id} in the database (device_id in its data rows)` };
 }
 
 export function deviceName(device) {

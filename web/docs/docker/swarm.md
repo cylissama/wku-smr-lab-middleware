@@ -17,6 +17,7 @@ docker node ls
 | RPI-IMU-BENCH | worker | `imu-111` (bench node) |
 | RPiCamFront | worker, label `camera=front` | `camera-front` |
 | CameraPi2 | worker, label `camera=side` | `camera-side` |
+| RPICAM3 | worker, label `camera=cam3` | `camera-cam3` |
 
 ## The edge stack
 
@@ -29,7 +30,7 @@ Each service has:
 | | IMUs | Cameras |
 | --- | --- | --- |
 | Image | `smart-mfg-imu:latest` (local on the Pi) | `camera-edge:latest` (local on the Pi) |
-| Placement | `node.hostname == ${IMU_<id>_HOSTNAME}` | `node.labels.camera == front` / `side` |
+| Placement | `node.hostname == ${IMU_<id>_HOSTNAME}` | `node.labels.camera == front` / `side` / `cam3` |
 | Mounts from the Pi | `/run/imu-hw` (socket to `imu_host`), `/opt/smart-mfg-imu/data` | `/run/camera-hw`, `/opt/camera-sensor-fusion/data` |
 | Labels | `smr.category: imu`, `smr.device: <id>` | `smr.category: camera`, `smr.device: <id>_<name>` |
 | Health check | `python3 -m imu_edge healthcheck`, every 10 s, 15 s warm-up | `python3 -m camera_edge healthcheck`, every 10 s, 30 s warm-up |

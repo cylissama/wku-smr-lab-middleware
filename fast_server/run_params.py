@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -7,19 +8,25 @@ from typing import Any
 # edge ones go to stack-controller as env overrides for the edge stack, so each
 # must also be listed under env_overrides in stack_controller/stacks.yml, and
 # their defaults are deploy/.env's values. The others are read by fastapi-app
-# itself and default to its own environment (the repo-root .env).
+# itself and default to its own environment (the repo-root .env). monitor_only
+# ones don't apply to (and aren't stored with) a recording session.
 PARAMS: dict[str, dict[str, Any]] = {
     "IMU_SAMPLE_HZ": {
         "label": "IMU sample rate", "group": "imu", "type": "int", "min": 1, "max": 200, "unit": "Hz",
         "edge": True, "help": "Readings per second from every IMU",
     },
     "IMU_PLC_TRIGGER_ON_RECORD": {
-        "label": "Wait for PLC start", "group": "imu", "type": "bool", "edge": False,
-        "help": "When recording, the IMUs start sending on the PLC's Data_Start. Monitoring never waits.",
+        "label": "Wait for PLC start", "group": "plc", "type": "bool", "edge": False,
+        "help": "When recording, the IMUs and cameras start sending on the PLC's Data_Start. Monitoring never waits.",
     },
     "IMU_PLC_MAX_RUN_S": {
         "label": "Max PLC run", "group": "imu", "type": "int", "min": 30, "max": 3600, "unit": "s",
         "edge": True, "help": "IMUs stop sending if Db_Stop hasn't come by then",
+    },
+    "MONITOR_PLC_IP": {
+        "label": "Simulated PLC IP", "group": "plc", "type": "ip", "edge": False, "monitor_only": True,
+        "help": "Start Monitoring with a stand-in PLC (a Pi): IMUs and cameras wait for its Data_Start. "
+                "Empty or 0 = stream right away. Recording always uses the real PLC.",
     },
 }
 
@@ -27,10 +34,12 @@ EDGE_PARAMS = [key for key, p in PARAMS.items() if p["edge"]]
 
 _TRUE = {"true", "1", "yes", "on"}
 _FALSE = {"false", "0", "no", "off"}
+# What an ip parameter accepts for "none"
+_NO_IP = {"", "0", "0.0.0.0"}
 
 
 # value (from JSON or an env file) checked against PARAMS[key]; raises ValueError
-def parse(key: str, value: Any) -> bool | int | float:
+def parse(key: str, value: Any) -> bool | int | float | str:
     p = PARAMS[key]
 
     if p["type"] == "bool":
@@ -38,6 +47,15 @@ def parse(key: str, value: Any) -> bool | int | float:
         if text not in _TRUE | _FALSE:
             raise ValueError(f"{key} must be true or false")
         return text in _TRUE
+
+    if p["type"] == "ip":
+        text = "" if value is None else str(value).strip()
+        if text in _NO_IP:
+            return ""
+        try:
+            return str(ipaddress.IPv4Address(text))
+        except ValueError:
+            raise ValueError(f"{key} must be an IPv4 address like 192.168.1.50, or empty/0 for none")
 
     try:
         number = float(value)
@@ -52,7 +70,7 @@ def parse(key: str, value: Any) -> bool | int | float:
 
 
 # How a value is written into a stack's environment
-def env_value(value: bool | int | float) -> str:
+def env_value(value: bool | int | float | str) -> str:
     return ("true" if value else "false") if isinstance(value, bool) else str(value)
 
 

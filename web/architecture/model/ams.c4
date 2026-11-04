@@ -60,9 +60,9 @@ model {
     }
   }
 
-  ams.fastapi-app.ingest -> ams.fastapi-app.capture 'asks whether to queue'
-  ams.fastapi-app.capture -> ams.fastapi-app.workers 'queues rows (RECORD only)'
-  ams.fastapi-app.capture -> ams.fastapi-app.live 'live samples (MONITOR, RECORD)'
+  ams.fastapi-app.ingest -> ams.fastapi-app.capture 'checks mode and device selection'
+  ams.fastapi-app.ingest -> ams.fastapi-app.workers 'queues rows (RECORD only)'
+  ams.fastapi-app.ingest -> ams.fastapi-app.live 'live samples (MONITOR, RECORD)'
   ams.fastapi-app.sessions -> ams.fastapi-app.capture 'sets mode and selection'
   ams.fastapi-app.plcWatcher -> ams.fastapi-app.sessions 'Db_Stop pulse stops the session'
   ams.fastapi-app.sessions -> ams.fastapi-app.backup 'backup on stop'

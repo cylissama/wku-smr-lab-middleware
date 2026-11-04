@@ -7,6 +7,7 @@ The **Run Parameters** panel on the dashboard sets per-run values for the edge d
 | IMU sample rate | `IMU_SAMPLE_HZ` | 1–200 Hz | `deploy/.env` |
 | Wait for PLC start | `IMU_PLC_TRIGGER_ON_RECORD` | on/off | repo-root `.env` |
 | Max PLC run | `IMU_PLC_MAX_RUN_S` | 30–3600 s | `deploy/.env` |
+| Simulated PLC IP | `MONITOR_PLC_IP` | IPv4, or empty/`0` for none | none |
 
 ## How it behaves
 
@@ -22,7 +23,9 @@ The **Run Parameters** panel on the dashboard sets per-run values for the edge d
 SELECT id, label, parameters->>'IMU_SAMPLE_HZ' AS imu_hz FROM session ORDER BY id DESC;
 ```
 
-*Wait for PLC start* sets `IMU_PLC_TRIGGER` for recording sessions only. Monitoring always streams without waiting. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
+*Wait for PLC start* (PLC group) sets `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` for recording sessions only, so it covers the IMUs and the cameras. Monitoring streams without waiting. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
+
+*Simulated PLC IP* is the other way round: it only affects monitoring, which then waits for that PLC's `Data_Start`. The real PLC (`192.168.1.103`) is refused. Sessions don't use it, so it's left out of `session.parameters` and the Start Session confirmation. See [Monitoring with a simulated PLC](/operations/plc-auto-stop#monitoring-with-a-simulated-plc).
 
 ## Where things live
 

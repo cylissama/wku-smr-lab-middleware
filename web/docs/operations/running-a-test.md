@@ -87,7 +87,7 @@ From here, click **Start Session** to record, or **Stop Monitoring** to take the
 
 Click **Start Session**, then **Confirm & Start**. The confirmation lists any run parameters changed from their defaults.
 
-In a session, the IMUs run in **PLC trigger mode**: they only send after the robot's PLC pulses `Data_Start`, tare on `IMU_Tare`, and stop sending on `Db_Stop`. Starting a session therefore (re)starts the IMU services (the cameras keep running if you were monitoring), and the Misc box says so. An IMU only notices a `Data_Start` that comes *after* it is running, so **wait until the IMUs show as running before starting the robot**. Until the robot starts, the IMUs show as not receiving; that's expected.
+In a session, the IMUs and cameras run in **PLC trigger mode**: they only send after the robot's PLC pulses `Data_Start`, and stop sending on `Db_Stop` (the IMUs also tare on `IMU_Tare`). Starting a session therefore (re)starts the IMU and camera services, and the Misc box says so. An IMU or camera only notices a `Data_Start` that comes *after* it is running, so **wait for the green "Edge ready" banner under the session buttons before starting the robot**. It appears the moment every selected IMU and camera is healthy, with that time to the millisecond (the same line goes to the Misc box and the logs). Until then the banner is amber and names the devices still starting. Until the robot starts, the IMUs and cameras show as not receiving; that's expected. See [Edge readiness](/overview/capture-modes#edge-readiness) for what "healthy" does and doesn't guarantee.
 
 To record without the PLC (for example, no robot run), turn off **Wait for PLC start** in Run Parameters first.
 
@@ -102,10 +102,12 @@ With PLC auto stop on (the lab default), you don't have to do anything. When the
 Otherwise, click **Stop Session**. Either way, the AMS:
 
 1. stops accepting new data
-2. removes the edge devices
+2. removes the edge devices and waits until their containers have stopped (normally about 4 s)
 3. waits up to 10 s for the IMU, camera and robot buffers to be written (a warning names any that didn't drain in time)
 4. ends the session
-5. takes a database backup
+5. starts a database backup in the background (about 20 s; the next session can start meanwhile)
+
+Start Session stays greyed out until all of this but the backup is done, so you can start the next run as soon as it's enabled again.
 
 ## 8. Review the data
 

@@ -35,11 +35,11 @@ These return a whole session at once; for analysis, query the database directly 
 | `GET /camera/{label}` | All `image_detection` rows for a session label |
 | `GET /robot/{label}` | All `robot` rows for a session label, in two shapes |
 
-`GET /robot/{label}` is notable: alongside the raw rows, it also returns a `twins` array — one object per row shaped as `{ ts, joints: [...6], tcp: [x,y,z], quat: [w,p,r,1] }` — reshaped specifically for the digital-twin visualization consumers.
+`GET /robot/{label}` is notable: alongside the raw rows, it also returns a `twins` array — one object per row shaped as `{ ts, joints: [...6], tcp: [x,y,z], quat: [w,p,r,1] }` — reshaped specifically for the digital-twin visualization consumers. The digital twin (and the AI service linked from the dashboard header) are work in progress and not finished yet.
 
 ## Backup and restore
 
-- `db.create_backup()` runs `pg_dump -F c` into the NFS-mounted `/db_backups` volume (backed by the Synology NAS), named `<db>_<UTC timestamp>.dump`. This runs automatically on every `session/stop`, and can also be triggered directly via `GET /backup`.
+- `db.create_backup()` runs `pg_dump -F c` into the NFS-mounted `/db_backups` volume (backed by the Synology NAS), named `<db>_<UTC timestamp>.dump`. This runs automatically (in the background) after every session stop, and can also be triggered directly via `GET /backup`, which is refused while an automatic one is running.
 - `GET /backup/list` lists available `.dump` files.
 - `POST /backup/restore/{filename}` is destructive: it terminates all other connections to the database, drops it, recreates it, and runs `pg_restore` from the chosen dump — then reconnects the pool and clears all in-memory caches (devices, session history, current session).
 

@@ -21,6 +21,14 @@ STACKS_CONFIG_PATH = os.getenv("STACKS_CONFIG_PATH", "/config/stacks.yml")
 # since stack names come from the config file rather than being known up front.
 _locks: dict[str, asyncio.Lock] = {}
 
+# Stacks with a remove in progress, so GET /status can say "removing" while
+# the services are already gone but their containers are still stopping
+_removing: set[str] = set()
+
+# How long a remove waits for the stack's containers to stop (normally ~4 s)
+REMOVE_WAIT_S = float(os.getenv("REMOVE_WAIT_S", "30"))
+REMOVE_POLL_S = 0.5
+
 
 def load_stacks() -> dict[str, Any]:
     with open(STACKS_CONFIG_PATH) as f:
@@ -262,6 +270,27 @@ async def deploy(name: str, body: DeployRequest | None = None) -> dict[str, Any]
             "output": result.stdout.strip()}
 
 
+# Waits until none of the stack's containers are still up (see
+# docker_ops.live_tasks). Returns the ones still up at the deadline, or None
+# if Docker couldn't be asked.
+async def wait_for_teardown(stack_name: str, timeout: float) -> list[str] | None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+
+    while True:
+        try:
+            live = await asyncio.to_thread(docker_ops.live_tasks, stack_name)
+        except Exception:
+            return None
+        if not live or loop.time() >= deadline:
+            return live
+        await asyncio.sleep(REMOVE_POLL_S)
+
+
+# Removes the stack and returns once its containers have actually stopped
+# (up to REMOVE_WAIT_S), so a deploy right after can't overlap the old ones.
+# teardown_confirmed is False if they were still up at the deadline (listed
+# in still_running) or Docker couldn't be checked; the stack is removed either way.
 @app.post("/stacks/{name}/remove", dependencies=[Depends(verify_token)])
 async def remove(name: str) -> dict[str, Any]:
     cfg = get_stack_config(name)
@@ -271,18 +300,27 @@ async def remove(name: str) -> dict[str, Any]:
         raise HTTPException(409, f"Stack '{name}' already has an action in progress")
 
     async with lock:
+        _removing.add(name)
         try:
-            result = await asyncio.to_thread(docker_ops.remove_stack, cfg["stack_name"])
-        except subprocess.TimeoutExpired:
-            raise HTTPException(504, f"Timed out removing stack '{name}'")
+            try:
+                result = await asyncio.to_thread(docker_ops.remove_stack, cfg["stack_name"])
+            except subprocess.TimeoutExpired:
+                raise HTTPException(504, f"Timed out removing stack '{name}'")
 
-    if result.returncode != 0:
-        raise HTTPException(500, (result.stderr or result.stdout).strip())
+            if result.returncode != 0:
+                raise HTTPException(500, (result.stderr or result.stdout).strip())
 
-    return {"success": True, "stack": name, "output": result.stdout.strip()}
+            still_running = await wait_for_teardown(cfg["stack_name"], REMOVE_WAIT_S)
+        finally:
+            _removing.discard(name)
+
+    return {"success": True, "stack": name, "output": result.stdout.strip(),
+            "teardown_confirmed": still_running == [], "still_running": still_running or None}
 
 
 @app.get("/stacks/{name}/status", dependencies=[Depends(verify_token)])
 async def status(name: str) -> dict[str, Any]:
     cfg = get_stack_config(name)
+    if name in _removing:
+        return {"state": "removing", "services": []}
     return await asyncio.to_thread(docker_ops.get_stack_status, cfg["stack_name"])

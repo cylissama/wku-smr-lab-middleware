@@ -36,6 +36,55 @@ const CAPTURE_MODE_BADGES = {
     stopping: { label: "Stopping — flushing data", className: "border-amber-300 bg-amber-50 text-amber-800", dot: "bg-amber-500 animate-pulse" },
 };
 
+// Wall-clock time to the millisecond, e.g. 14:54:21.412
+function formatClock(unixSeconds) {
+    const d = new Date(unixSeconds * 1000);
+    return `${d.toLocaleTimeString([], { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+}
+
+// When every selected edge device is healthy, from GET /capture's "edge"
+// (edge_ready_monitor in fast_server/main.py). Healthy = Swarm saw the
+// device's healthcheck pass; the robot isn't an edge device.
+function EdgeReadiness({ mode, busy, edge }) {
+    if (mode !== "monitor" && mode !== "record") {
+        return null;
+    }
+
+    const state = busy ? "busy" : edge?.state;
+    const healthy = Object.keys(edge?.healthy_at ?? {}).length;
+    const total = healthy + (edge?.waiting_for?.length ?? 0);
+    let className = "border-gray-300 bg-gray-50 text-gray-700";
+    let text = "Checking edge devices...";
+
+    if (state === "busy") {
+        text = "Deploying edge devices...";
+    } else if (state === "ready") {
+        className = "border-green-300 bg-green-50 text-green-800";
+        text = total
+            ? `Edge ready at ${formatClock(edge.ready_at)}: all ${total} edge device(s) healthy, ` +
+              `${(edge.ready_at - edge.started_at).toFixed(1)} s after the start` +
+              (mode === "record" ? " -- the robot can start" : "")
+            : "No edge devices selected";
+    } else if (state === "waiting") {
+        className = "border-amber-300 bg-amber-50 text-amber-800";
+        text = `Edge starting (${healthy}/${total} healthy): waiting for ${edge.waiting_for.join(", ")}`;
+    } else if (state === "unknown") {
+        className = "border-red-300 bg-red-50 text-red-800";
+        text = `Edge status unknown: ${edge.error}`;
+    }
+
+    return (
+        <div role="status" className={`mt-3 rounded-md border px-3 py-2 text-sm font-medium ${className}`}>
+            {text}
+            {edge?.unavailable?.length > 0 && (
+                <span className="mt-1 block text-xs font-normal">
+                    Not running, Swarm can't place them (node down?): {edge.unavailable.join(", ")}
+                </span>
+            )}
+        </div>
+    );
+}
+
 function CaptureModeBadge({ mode }) {
     const badge = CAPTURE_MODE_BADGES[mode] ?? CAPTURE_MODE_BADGES.idle;
 
@@ -94,6 +143,9 @@ export default function DataDashboard() {
     const [isSessionLabelsLoading, setIsSessionLabelsLoading] = useState(true);
     const [captureMode, setCaptureMode] = useState("idle");
     const [isMonitorBusy, setIsMonitorBusy] = useState(false);
+    // From /capture: a start/stop/redeploy is in progress on the server, and edge readiness
+    const [captureBusy, setCaptureBusy] = useState(false);
+    const [captureEdge, setCaptureEdge] = useState(null);
     // Device keys the backend is currently capturing (null = all), from /capture
     const [captureDevices, setCaptureDevices] = useState(null);
     const [devices, setDevices] = useState([]);
@@ -162,9 +214,6 @@ export default function DataDashboard() {
         try {
             const json = await getSessionStatus();
             setActiveSession(Boolean(json.data));
-            const capture = await getCapture();
-            setCaptureMode(capture.mode);
-            setCaptureDevices(capture.devices ?? null);
         } catch (e) {
             // An unreachable API is already shown by the System Health strip;
             // anything else gets recorded with the dashboard's own errors
@@ -178,6 +227,28 @@ export default function DataDashboard() {
 
     return () => clearInterval(intervalId);
 }, []);
+
+    // Capture state every second (in memory on the server, no DB), so edge
+    // readiness and a stop/start in progress show up right away
+    useEffect(() => {
+        const pollCapture = async () => {
+            try {
+                const capture = await getCapture();
+                setCaptureMode(capture.mode);
+                setCaptureDevices(capture.devices ?? null);
+                setCaptureBusy(Boolean(capture.busy));
+                setCaptureEdge(capture.edge ?? null);
+            } catch (e) {
+                // An unreachable API is already shown by the System Health strip
+                if (!(e instanceof TypeError)) {
+                    reportDashboardError(`Capture status poll failed: ${getErrorMessage(e)}`);
+                }
+            }
+        };
+
+        const intervalId = setInterval(pollCapture, 1000);
+        return () => clearInterval(intervalId);
+    }, []);
 
     // (Re)loaded whenever the database (re)connects -- with it down there's
     // nothing to load, and the page must not wait on it
@@ -268,7 +339,8 @@ export default function DataDashboard() {
         return data;
     };
 
-    const changedRunParams = (runParams ?? []).filter((param) => param.overridden);
+    // Monitoring-only ones (the simulated PLC) don't apply to a session
+    const changedRunParams = (runParams ?? []).filter((param) => param.overridden && !param.monitor_only);
 
     useEffect(() => {
         if (!dbUp) {
@@ -426,12 +498,14 @@ export default function DataDashboard() {
 
     const isActionDisabled = isStatusLoading || isLatestSessionLoading || isSessionLabelsLoading;
     const canStartSession =
-        dbUp && !activeSession && !isActionDisabled && !isMonitorBusy && hasDeviceSelection && Boolean(selectedSessionLabel);
+        dbUp && !activeSession && !captureBusy && !isActionDisabled && !isMonitorBusy && hasDeviceSelection &&
+        Boolean(selectedSessionLabel);
     const isMonitoring = captureMode === "monitor";
     const canToggleMonitoring =
         !systemHealth.apiError &&
         !isActionDisabled &&
         !isMonitorBusy &&
+        !captureBusy &&
         (isMonitoring || (captureMode === "idle" && !activeSession && hasDeviceSelection));
 
     return (
@@ -577,6 +651,8 @@ export default function DataDashboard() {
                                     Fake Data
                                 </label>
                             </div>
+
+                            <EdgeReadiness mode={captureMode} busy={captureBusy} edge={captureEdge} />
                         </div>
 
                         <div className="border-t border-gray-200 pt-4">

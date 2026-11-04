@@ -4,7 +4,7 @@ Things that happen automatically, without an operator running a manual command:
 
 ## Automatic database backups
 
-Every time a session ends (`GET /session/stop`, or a PLC stop), `fastapi-app` calls `try_backup()` before returning — a `pg_dump` runs unprompted and lands in the NFS-mounted `/db_backups` volume on the NAS. Operators don't need to remember to back up after a test; the only manual backup path (`GET /backup`) exists for on-demand use outside of a session. See [Database uses](/data/database-uses) for the full backup/restore flow.
+Every time a session ends (`GET /session/stop`, or a PLC stop), `fastapi-app` starts `try_backup()` in the background once the session is ended — a `pg_dump` runs unprompted and lands in the NFS-mounted `/db_backups` volume on the NAS. The stop doesn't wait for it (it takes about 20 s), so the next session can start right away. If another session ends while it runs, one more backup follows it; manual backups and restores are refused until it's done. Operators don't need to remember to back up after a test; the only manual backup path (`GET /backup`) exists for on-demand use outside of a session. See [Database uses](/data/database-uses) for the full backup/restore flow.
 
 ## Batched ingestion flushing
 

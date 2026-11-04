@@ -65,6 +65,7 @@ specification {
 
   // --- Tags ---
   tag placeholder   // details unknown; fill in (see the element's description)
+  tag wip           // being built, not finished yet
   tag perRun        // deployed by the dashboard for each monitor/session run, removed on stop
   tag optional      // only with a compose profile (e.g. local-db)
 

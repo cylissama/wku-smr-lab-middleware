@@ -135,6 +135,8 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
             # A fresh lock per test: asyncio.Lock binds to the loop it first waits on
             patch("fast_server.main.session_lock", asyncio.Lock()),
             patch("fast_server.main.last_stop", None),
+            patch("fast_server.main.backup_task", None),
+            patch("fast_server.main.backup_requested", False),
         ]
         for p in self.patches:
             p.start()
@@ -161,6 +163,7 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         self.db.end_session.assert_awaited_once()
         self.remove.assert_awaited_once()
+        await m.backup_task
         m.try_backup.assert_awaited_once()
         self.assertEqual(m.capture.mode, CaptureMode.IDLE)
         self.assertEqual(m.last_stop[0], 7)
@@ -205,6 +208,7 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(plc_result)
         self.assertTrue(button_result["success"])
         self.db.end_session.assert_awaited_once()
+        await m.backup_task
         m.try_backup.assert_awaited_once()
 
     async def test_button_right_after_plc_stop_says_already_stopped(self):
@@ -227,6 +231,64 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         self.assertNotIn("already_stopped", result)
         self.db.end_session.assert_awaited_once()
+
+    async def test_stop_returns_and_frees_the_lock_before_the_backup_finishes(self):
+        m.capture.set(CaptureMode.RECORD, session_id=12)
+        release = asyncio.Event()
+
+        async def slow_backup():
+            await release.wait()
+            return {"success": True}
+
+        m.try_backup.side_effect = slow_backup
+
+        result = await m.stop_session_from_plc()
+
+        self.assertEqual(result["backup"], {"success": True, "started": True})
+        self.assertFalse(m.session_lock.locked())
+        self.assertTrue(m.backup_running())
+        release.set()
+        await m.backup_task
+        self.assertFalse(m.backup_running())
+
+    async def test_stop_while_a_backup_runs_queues_one_more_backup(self):
+        release = asyncio.Event()
+
+        async def slow_backup():
+            await release.wait()
+            return {"success": True}
+
+        m.try_backup.side_effect = slow_backup
+
+        m.capture.set(CaptureMode.RECORD, session_id=13)
+        await m.stop_session_from_plc()
+        for sid in (14, 15):
+            m.capture.set(CaptureMode.RECORD, session_id=sid)
+            result = await m.stop_session_from_plc()
+            self.assertTrue(result["backup"]["queued"])
+
+        release.set()
+        await m.backup_task
+        # One backup for 13, then one covering both 14 and 15
+        self.assertEqual(m.try_backup.await_count, 2)
+        self.assertFalse(m.backup_running())
+
+    async def test_manual_backup_and_restore_refused_while_a_backup_runs(self):
+        release = asyncio.Event()
+
+        async def slow_backup():
+            await release.wait()
+            return {"success": True}
+
+        m.try_backup.side_effect = slow_backup
+        m.capture.set(CaptureMode.RECORD, session_id=15)
+        await m.stop_session_from_plc()
+
+        self.assertFalse((await m.backup())["success"])
+        self.assertFalse((await m.restore_backup("x.dump"))["success"])
+        self.db.restore_backup.assert_not_called()
+        release.set()
+        await m.backup_task
 
     async def test_supervisor_stops_on_a_new_pulse(self):
         m.capture.set(CaptureMode.RECORD, session_id=9)

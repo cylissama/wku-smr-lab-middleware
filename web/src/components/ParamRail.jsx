@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CATEGORY_NAMES } from "../lib/deviceState";
 
 const CHANGED_COLOR = "#0891b2";
+const GROUP_NAMES = { ...CATEGORY_NAMES, plc: "PLC" };
 const DEFAULT_COLOR = "#9ca3af";
 
 function formatValue(param, value) {
@@ -10,6 +11,9 @@ function formatValue(param, value) {
     }
     if (param.type === "bool") {
         return value ? "On" : "Off";
+    }
+    if (param.type === "ip") {
+        return value || "None";
     }
     return `${value}${param.unit ? ` ${param.unit}` : ""}`;
 }
@@ -49,6 +53,16 @@ function ParamTile({ param, draft, onDraft, locked, error }) {
                     />
                     {value ? "On" : "Off"}
                 </label>
+            ) : param.type === "ip" ? (
+                <input
+                    id={inputId}
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="None (0)"
+                    className="w-36 rounded-md border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 focus:border-blue-500 focus:outline-none"
+                    value={value ?? ""}
+                    onChange={(event) => onDraft(param.key, event.target.value)}
+                />
             ) : (
                 <div className="flex items-center gap-1.5">
                     <input
@@ -68,7 +82,7 @@ function ParamTile({ param, draft, onDraft, locked, error }) {
 
             <div className="text-xs text-gray-500">
                 default {formatValue(param, param.default)}
-                {param.type !== "bool" && ` · ${param.min}–${param.max}`}
+                {param.min !== undefined && ` · ${param.min}–${param.max}`}
                 {!locked && param.overridden && !edited && (
                     <button
                         type="button"
@@ -146,7 +160,7 @@ export default function ParamRail({ params, editable, captureMode, loadError, on
             <div className="flex flex-col gap-4">
                 {groups.map(([group, list]) => (
                     <section key={group}>
-                        <h3 className="mb-1.5 text-sm font-semibold text-gray-700">{CATEGORY_NAMES[group] ?? group}</h3>
+                        <h3 className="mb-1.5 text-sm font-semibold text-gray-700">{GROUP_NAMES[group] ?? group}</h3>
                         <div className="flex flex-col gap-2">
                             {list.map((param) => (
                                 <ParamTile

@@ -66,13 +66,13 @@ model {
     }
 
     twin = external 'Digital twin' {
-      #placeholder
-      description 'TODO: confirm. GET /robot/{label} returns a `twins` array shaped for it; the dashboard links to it when VITE_TWINS_URL is set.'
+      #wip
+      description 'Work in progress, not finished. GET /robot/{label} returns a `twins` array shaped for it; the dashboard links to it when VITE_TWINS_URL is set.'
     }
 
     ai = external 'AI service' {
-      #placeholder
-      description 'TODO: what it is and what it reads. The dashboard links to it when VITE_AI_URL is set.'
+      #wip
+      description 'Work in progress, not finished. The dashboard links to it when VITE_AI_URL is set.'
     }
   }
 }

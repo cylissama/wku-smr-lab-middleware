@@ -109,6 +109,9 @@ PLC_POLL_S = max(0.01, float(os.getenv("PLC_POLL_S", 0.05)))
 PLC_RETRY_S = float(os.getenv("PLC_RETRY_S", 1.0))
 PLC_FAKE = env_flag("PLC_FAKE")
 PLC_FAKE_SPEED = float(os.getenv("PLC_FAKE_SPEED", 1.0))
+# The cell's real PLC. Monitoring can be pointed at a simulated PLC (the
+# MONITOR_PLC_IP run parameter), but never at this one.
+REAL_PLC_IP = os.getenv("REAL_PLC_IP", PLC_PATH.split("/")[0]).strip()
 
 # Dependency health, served by GET /health -- see fast_server/health.py
 health = HealthRegistry(
@@ -224,15 +227,63 @@ deployed_env: dict[str, str] | None = None
 
 # Edge-stack settings for a deploy in this capture mode (stack-controller only
 # accepts the variables a stack lists under env_overrides in stacks.yml): the
-# edge run parameters, plus IMU_PLC_TRIGGER. Monitoring streams right away; in
-# a recording session the IMU nodes wait for the PLC's Data_Start pulse before
-# sending, unless IMU_PLC_TRIGGER_ON_RECORD is off (e.g. with no robot).
+# edge run parameters, plus IMU_PLC_TRIGGER and CAMERA_PLC_TRIGGER. Monitoring
+# streams right away, unless MONITOR_PLC_IP names a simulated PLC: then the IMUs
+# and cameras use it and wait for its Data_Start. In a recording session the IMU
+# and camera nodes wait for the real PLC's (the .env PLC paths) Data_Start pulse
+# before sending, unless IMU_PLC_TRIGGER_ON_RECORD is off (e.g. with no robot).
 def stack_env(mode: CaptureMode) -> dict[str, str]:
     env = {k: run_params.env_value(v) for k, v in run_overrides.items() if k in run_params.EDGE_PARAMS}
+    sim_plc = monitor_plc_ip()
+    if mode == CaptureMode.MONITOR and sim_plc:
+        env.update(IMU_PLC_TRIGGER="true", IMU_PLC_PATH=sim_plc, CAMERA_PLC_TRIGGER="true", CAMERA_PLC_PATH=sim_plc)
+        return env
     wait = mode == CaptureMode.RECORD and run_overrides.get(
         "IMU_PLC_TRIGGER_ON_RECORD", env_flag("IMU_PLC_TRIGGER_ON_RECORD", True))
-    env["IMU_PLC_TRIGGER"] = "true" if wait else "false"
+    env["IMU_PLC_TRIGGER"] = env["CAMERA_PLC_TRIGGER"] = "true" if wait else "false"
     return env
+
+# The simulated PLC monitoring uses, or "" for none
+def monitor_plc_ip() -> str:
+    return run_overrides.get("MONITOR_PLC_IP", "")
+
+def is_real_plc(ip: str) -> bool:
+    return bool(ip) and ip == REAL_PLC_IP
+
+REAL_PLC_REFUSAL = f"{REAL_PLC_IP} is the real cell PLC: monitoring can't use it. Enter a simulated PLC's IP, or 0 for none"
+
+# The backup a session stop starts in the background (see start_stop_backup)
+backup_task: asyncio.Task | None = None
+# A session ended while that backup was running, so it needs one more after it
+backup_requested = False
+
+def backup_running() -> bool:
+    return backup_task is not None and not backup_task.done()
+
+BACKUP_BUSY = {"success": False, "error": "A backup is already running, try again when it finishes"}
+
+# Backs up until no session has ended since the last backup started, so a
+# session that ends during a backup is still covered by the next one
+async def run_stop_backups() -> None:
+    global backup_requested
+    while True:
+        await try_backup()
+        if not backup_requested:
+            return
+        backup_requested = False
+
+# Starts the end-of-session backup without waiting for it, so a stop doesn't
+# hold session_lock through ~20 s of pg_dump (which made a Start right after a
+# stop hang). Its result reaches the dashboard via /ws/misc and the logs.
+def start_stop_backup() -> dict[str, Any]:
+    global backup_task, backup_requested
+    if backup_running():
+        backup_requested = True
+        loggers.log_event("A backup is already running: another will follow it to include this session",
+                          category="backup")
+        return {"success": True, "queued": True}
+    backup_task = start_background(run_stop_backups())
+    return {"success": True, "started": True}
 
 # Attempts to create a backup of DB and returns a status code of whether it was successful or not
 async def try_backup() -> dict[str, Any]:
@@ -359,6 +410,8 @@ def list_backups() -> dict[str, list[str]]:
 @app.get("/backup")
 async def backup() -> dict[str, Any]:
   require_db()
+  if backup_running():
+      return BACKUP_BUSY
   return await try_backup()
 
 # API to attempt to restore a backup
@@ -366,6 +419,10 @@ async def backup() -> dict[str, Any]:
 async def restore_backup(filename: str) -> dict[str, Any]:
 
     db = require_db()
+
+    # Restoring drops the database under a running pg_dump
+    if backup_running():
+        return BACKUP_BUSY
 
     try:
 
@@ -523,7 +580,8 @@ async def call_stack_controller(action: str, stack: str, services: list[str] | N
 # env is passed through to every deploy (see stack_env()).
 async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None,
                                 env: dict[str, str] | None = None) -> dict[str, dict[str, Any]]:
-    global deployed_env
+    global deployed_env, deploy_started_at
+    deploy_started_at = time.time()
 
     async def deploy_one(stack: str) -> dict[str, Any]:
         services = plan.get(stack) if plan is not None else None
@@ -590,6 +648,47 @@ class DeviceSelection(BaseModel):
     # Device keys like "imu/106"; omit (null) for every device
     devices: list[str] | None = None
 
+# One edge device's state from its stack's GET /stacks/{name}/status: state,
+# plus since (unix s its container turned healthy) and error if there are any
+def device_swarm_state(status: dict[str, Any], service: str) -> dict[str, Any]:
+    if not status.get("success") or (status.get("state") == "error" and not status.get("services")):
+        return {"state": "unknown"}
+    if status.get("state") == "removing":
+        # Its containers are still stopping (stack-controller's remove)
+        return {"state": "removing"}
+    # Swarm names services <stack name>_<service>
+    for svc in status.get("services", []):
+        if svc["name"].endswith("_" + service):
+            return {"state": svc["state"], "since": svc.get("since"), "error": svc.get("error")}
+    return {"state": "not_deployed"}
+
+# Each device's row id in the device table, so the dashboard can show it (it's
+# what the data tables' device_id refers to). Re-read at most every
+# DEVICE_ID_REFRESH_S: a device gets its row the first time a session stores
+# its data, and a restore can renumber them. Best effort: {} while the DB is
+# down, and /devices works without it.
+DEVICE_ID_REFRESH_S = float(os.getenv("DEVICE_ID_REFRESH_S", 30))
+DEVICE_ID_TIMEOUT_S = 2.0
+device_ids: dict[str, int] = {}
+# (labels asked for, time.monotonic()) of the last lookup
+device_ids_read: tuple[frozenset[str], float] = (frozenset(), float("-inf"))
+
+async def lookup_device_ids(labels: list[str]) -> dict[str, int]:
+    global device_ids, device_ids_read
+    asked, read_at = device_ids_read
+    now = time.monotonic()
+    if asked == frozenset(labels) and now - read_at < DEVICE_ID_REFRESH_S:
+        return device_ids
+    db = app.state.db
+    if db is None or health.components["db"]["status"] == "down":
+        return device_ids
+    device_ids_read = (frozenset(labels), now)
+    try:
+        device_ids = await asyncio.wait_for(db.get_device_ids(labels), DEVICE_ID_TIMEOUT_S)
+    except Exception as e:
+        loggers.log_system_logger(f"Device id lookup failed: {describe_exc(e)}")
+    return device_ids
+
 # API to list selectable devices with their current state, for the dashboard
 @app.get("/devices")
 async def get_devices() -> dict[str, Any]:
@@ -598,13 +697,17 @@ async def get_devices() -> dict[str, Any]:
     except Exception as e:
         return {"error": str(e), "success": False}
 
-    *stack_statuses, robot_status = await asyncio.gather(
+    *stack_statuses, robot_status, ids = await asyncio.gather(
         *(stack_controller_request("GET", f"/stacks/{s}/status") for s in MANAGED_STACKS),
         get_robot_queue_status(),
+        lookup_device_ids([d["device_label"] for d in catalog]),
     )
     statuses = dict(zip(MANAGED_STACKS, stack_statuses))
 
     for device in catalog:
+        # Row id in the device table (data tables' device_id); None until the
+        # device's data has been stored once
+        device["db_id"] = ids.get(device["device_label"])
         # Is its data actually arriving? Only tracked while monitoring/recording.
         if device["stack"]:
             device.update(live_sampler.activity(device["key"], RECEIVING_TIMEOUT))
@@ -612,19 +715,112 @@ async def get_devices() -> dict[str, Any]:
             device.update(robot_status.get("activity") or {"receiving": False, "rate": None, "last_seen_s": None})
 
         if device["stack"]:
-            status = statuses[device["stack"]]
-            if not status.get("success") or (status.get("state") == "error" and not status.get("services")):
-                device["state"] = "unknown"
-            else:
-                # Swarm names services <stack name>_<service>
-                states = [s["state"] for s in status.get("services", []) if s["name"].endswith("_" + device["service"])]
-                device["state"] = states[0] if states else "not_deployed"
+            device.update(device_swarm_state(statuses[device["stack"]], device["service"]))
         elif "error" in robot_status:
             device["state"] = "unknown"
         else:
             device["state"] = "connected" if robot_status.get("connections", 0) > 0 else "not_connected"
 
     return {"data": catalog, "selected": capture.to_dict()["devices"], "success": True}
+
+# --- Edge readiness ---------------------------------------------------------
+# When every selected edge device's container is healthy after a deploy (or a
+# switch to recording), to the second. "Healthy" is Swarm seeing the device's
+# healthcheck pass (checked every 1 s while it starts, see
+# deploy/swarm-edge-nodes.yml); the edge agents don't yet say when they're
+# armed for the PLC's Data_Start. The robot isn't an edge device: not included.
+EDGE_READY_POLL_S = float(os.getenv("EDGE_READY_POLL_S", 1))
+EDGE_READY_TIMEOUT_S = float(os.getenv("EDGE_READY_TIMEOUT_S", 120))
+
+# When the last deploy_managed_stacks() started (unix s)
+deploy_started_at: float | None = None
+# Served in GET /capture as "edge"
+edge_ready: dict[str, Any] = {"state": "idle"}
+
+# Readiness of these devices ({key, state, since}) for a listening period that
+# began at started (unix s). ready_at is when the last one turned healthy, or
+# started if they all already were (e.g. monitoring -> recording, no redeploy).
+# Devices Swarm can't place (node down) don't hold it up; they're listed.
+def summarize_edge(devices: list[dict[str, Any]], started: float) -> dict[str, Any]:
+    waiting = sorted(d["key"] for d in devices if d["state"] not in ("running", "unavailable"))
+    unavailable = sorted(d["key"] for d in devices if d["state"] == "unavailable")
+    healthy = {d["key"]: max(d.get("since") or started, started) for d in devices if d["state"] == "running"}
+
+    summary = {"state": "waiting" if waiting else "ready", "started_at": started, "ready_at": None,
+               "last": None, "waiting_for": waiting, "unavailable": unavailable, "healthy_at": healthy}
+    if not waiting:
+        summary["last"] = max(healthy, key=healthy.get, default=None)
+        summary["ready_at"] = healthy[summary["last"]] if summary["last"] else started
+    return summary
+
+# The selected edge devices' Swarm states, from one status call per stack
+async def edge_device_states(catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    selected = [d for d in catalog if d["stack"] and (capture.devices is None or d["key"] in capture.devices)]
+    statuses = dict(zip(MANAGED_STACKS, await asyncio.gather(
+        *(stack_controller_request("GET", f"/stacks/{s}/status") for s in MANAGED_STACKS))))
+    return [{"key": d["key"], **device_swarm_state(statuses[d["stack"]], d["service"])} for d in selected]
+
+def format_clock(ts: float) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(ts)) + f".{int(ts % 1 * 1000):03d} {time.strftime('%Z', time.localtime(ts))}"
+
+# Every EDGE_READY_POLL_S while monitoring/recording: updates edge_ready, and
+# announces (log + /ws/misc) the moment all selected edge devices are healthy,
+# once per listening period. A new period starts on any capture change (e.g.
+# monitoring -> recording) or redeploy.
+async def edge_ready_monitor() -> None:
+    global edge_ready
+    period, catalog, announced, timeout_warned = None, None, False, False
+
+    while True:
+        await asyncio.sleep(EDGE_READY_POLL_S)
+
+        if not capture.is_listening():
+            edge_ready, period = {"state": "idle"}, None
+            continue
+
+        # A start/redeploy in progress: the services may not have their new
+        # spec yet, so the old containers would look ready
+        if session_lock.locked():
+            edge_ready = {"state": "busy"}
+            continue
+
+        # capture.version is (about) the wall-clock ms of the last capture change
+        started = max(capture.version / 1000, deploy_started_at or 0)
+        if period != (capture.version, deploy_started_at):
+            period, catalog, announced, timeout_warned = (capture.version, deploy_started_at), None, False, False
+
+        try:
+            catalog = catalog or await load_device_catalog()
+            summary = summarize_edge(await edge_device_states(catalog), started)
+        except Exception as e:
+            edge_ready = {"state": "unknown", "error": describe_exc(e), "started_at": started}
+            continue
+
+        summary["mode"] = capture.mode.value
+        edge_ready = summary
+
+        if summary["state"] == "ready" and not announced:
+            announced = True
+            if not summary["healthy_at"]:
+                continue  # no edge devices selected (robot only)
+            after = summary["ready_at"] - started
+            n = len(summary["healthy_at"])
+            msg = f"Edge ready: {n} edge device(s) healthy at {format_clock(summary['ready_at'])}, {after:.1f} s after the start"
+            if summary["last"]:
+                msg += f" (last: {summary['last']})"
+            if summary["unavailable"]:
+                msg += f"; not placed (node down?): {', '.join(summary['unavailable'])}"
+            if capture.mode == CaptureMode.RECORD:
+                msg += " -- the robot can start"
+            loggers.log_event(msg, category="session", session_id=capture.session_id,
+                              ready_at=summary["ready_at"], healthy_at=summary["healthy_at"])
+            await broadcast_message(misc_manager, msg, "info")
+        elif summary["state"] == "waiting" and not timeout_warned and time.time() - started > EDGE_READY_TIMEOUT_S:
+            timeout_warned = True
+            msg = (f"Edge still not ready {EDGE_READY_TIMEOUT_S:.0f} s after the start: "
+                   f"waiting for {', '.join(summary['waiting_for'])}")
+            loggers.log_event(msg, category="session", level=logging.WARNING, session_id=capture.session_id)
+            await broadcast_message(misc_manager, msg, "error")
 
 # Removes every stack in MANAGED_STACKS, returns {stack_name: result}
 async def remove_managed_stacks() -> dict[str, dict[str, Any]]:
@@ -662,7 +858,8 @@ async def set_capture(mode: CaptureMode, session_id: int | None = None, devices:
 # API to get the current capture state -- tcp_server re-syncs from this
 @app.get("/capture")
 async def get_capture() -> dict[str, Any]:
-    return capture.to_dict()
+    # busy: a start/stop/redeploy holds session_lock, so another would wait
+    return {**capture.to_dict(), "busy": session_lock.locked(), "edge": edge_ready}
 
 # Each run parameter's default: deploy/.env's value for the edge ones (via
 # stack-controller; None if it can't be read), this process's env for the other
@@ -670,7 +867,8 @@ async def run_param_defaults() -> dict[str, Any]:
     listings = await asyncio.gather(*(stack_controller_request("GET", f"/stacks/{s}/env") for s in MANAGED_STACKS))
     env = {k: v for listing in listings for k, v in (listing.get("env") or {}).items()}
 
-    defaults: dict[str, Any] = {"IMU_PLC_TRIGGER_ON_RECORD": env_flag("IMU_PLC_TRIGGER_ON_RECORD", True)}
+    defaults: dict[str, Any] = {"IMU_PLC_TRIGGER_ON_RECORD": env_flag("IMU_PLC_TRIGGER_ON_RECORD", True),
+                                "MONITOR_PLC_IP": ""}
     for key in run_params.EDGE_PARAMS:
         try:
             defaults[key] = run_params.parse(key, env[key])
@@ -679,8 +877,10 @@ async def run_param_defaults() -> dict[str, Any]:
     return defaults
 
 # Every run parameter's value for the next deploy, as stored in session.parameters
+# (monitoring-only ones left out: a session doesn't use them)
 async def effective_run_params() -> dict[str, Any]:
-    return {**await run_param_defaults(), **run_overrides}
+    values = {**await run_param_defaults(), **run_overrides}
+    return {k: v for k, v in values.items() if not run_params.PARAMS.get(k, {}).get("monitor_only")}
 
 # Run parameters can't change while a session is recording or stopping
 EDITABLE_PARAM_MODES = (CaptureMode.IDLE, CaptureMode.MONITOR)
@@ -724,6 +924,9 @@ async def put_parameters(body: RunParamsUpdate) -> dict[str, Any]:
                     new[key] = run_params.parse(key, value)
                 except ValueError as e:
                     errors[key] = str(e)
+                else:
+                    if key == "MONITOR_PLC_IP" and is_real_plc(new[key]):
+                        errors[key] = REAL_PLC_REFUSAL
 
         if errors:
             return {"error": "; ".join(errors.values()), "errors": errors, "success": False}
@@ -773,6 +976,12 @@ async def _start_listening(body: DeviceSelection | None) -> dict[str, Any]:
     if capture.mode != CaptureMode.IDLE:
         return {"error": f"Can't start monitoring while {capture.mode.value}", "success": False}
 
+    # Already refused by PUT /parameters, but a saved value or a changed
+    # REAL_PLC_IP could still get here
+    sim_plc = monitor_plc_ip()
+    if is_real_plc(sim_plc):
+        return {"error": REAL_PLC_REFUSAL, "success": False}
+
     try:
         selected, plan = await resolve_selection(body.devices if body else None)
     except Exception as e:
@@ -780,6 +989,9 @@ async def _start_listening(body: DeviceSelection | None) -> dict[str, Any]:
 
     await set_capture(CaptureMode.MONITOR, devices=selected)
     await broadcast_message(misc_manager, "Monitoring started -- live data only, nothing is stored", "info")
+    if sim_plc:
+        await broadcast_message(misc_manager, f"Using the simulated PLC at {sim_plc}: IMUs and cameras send after its "
+                                              "Data_Start and stop on Db_Stop", "info")
 
     deploy_results = await deploy_managed_stacks(plan, stack_env(CaptureMode.MONITOR))
     failed_stacks = [name for name, result in deploy_results.items() if not result.get("success")]
@@ -961,13 +1173,13 @@ async def _start_session(
                 "success": False,
             }
 
-        # The IMU nodes only see a Data_Start that comes after they've
-        # (re)started, so the robot has to wait for them
+        # The IMU and camera nodes only see a Data_Start that comes after
+        # they've (re)started, so the robot has to wait for them
         if record_env["IMU_PLC_TRIGGER"] == "true" and (
-            selected is None or any(key.startswith("imu/") for key in selected)
+            selected is None or any(key.startswith(("imu/", "camera/")) for key in selected)
         ):
-            await broadcast_message(misc_manager, "IMUs are (re)starting to wait for the robot's PLC Data_Start -- "
-                                                  "start the robot once they show as running", "info")
+            await broadcast_message(misc_manager, "IMUs and cameras are (re)starting to wait for the robot's PLC Data_Start -- "
+                                                  "start the robot after the \"Edge ready\" message", "info")
 
         return {
             "message": f"Session started with label: {label}",
@@ -1034,6 +1246,15 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
         await broadcast_message(misc_manager, f"Failed to remove '{name}' stack: {err}", "error")
         # Session/backup still proceed below either way -- surfaced as an error, not fatal.
 
+    # Removed, but some containers hadn't stopped yet (or Docker couldn't be
+    # asked): a start right now could overlap them
+    for name, result in remove_results.items():
+        if result.get("success") and result.get("teardown_confirmed") is False:
+            still = ", ".join(result.get("still_running") or []) or "couldn't check"
+            msg = f"'{name}' stack removed, but its containers may still be stopping ({still})"
+            loggers.log_event(msg, category="session", level=logging.WARNING, session_id=session_id)
+            await broadcast_message(misc_manager, msg, "error")
+
     # With the DB down nothing can flush, so don't wait out the drain timeout
     db_up = app.state.db is not None and health.components["db"]["status"] != "down"
     drained, still_buffered = await drain_queues() if db_up else (False, ["imu", "camera", "robot"])
@@ -1072,7 +1293,7 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
 
     await broadcast_message(misc_manager, f"Session ended with logs successfully{because}")
 
-    msg = await try_backup()
+    msg = start_stop_backup()
     last_stop = (session_id, time.monotonic(), reason)
 
     return {
@@ -1212,6 +1433,7 @@ async def startup():
     if PLC_AUTO_STOP:
         start_plc_listener()
     start_background(health_monitor())
+    start_background(run_forever("edge_ready_monitor", edge_ready_monitor))
 
 # Connects to the DB, retrying with backoff until it works, then resumes an
 # open session and starts the IMU/camera workers. Later outages are spotted by

@@ -33,22 +33,24 @@ model {
     }
 
     cameraNode = zone 'Camera node' {
-      description 'A Pi with a camera. Two of them: camera-front (113) and camera-side (114).'
+      description 'A Pi with a camera. Three of them: camera-front (113), camera-side (114) and camera-cam3 (115).'
       link /docs/hardware/camera 'Camera nodes'
       link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
 
       camera = device 'Camera' {
+        #placeholder
         technology 'V4L2 /dev/video0'
-        description 'TODO: camera model.'
+        description 'Placeholder: camera model.'
       }
       cameraHost = hostService 'Camera host service' {
         #placeholder
-        description 'TODO: what provides /run/camera-hw on the Pi.'
+        description 'Placeholder: what provides /run/camera-hw on the Pi, how it is installed and run (systemd unit?), and how camera-edge:latest gets onto the Pi.'
+        link /docs/hardware/camera 'Camera nodes'
       }
       cameraEdge = service 'camera_edge' {
         #perRun
         technology 'camera-edge:latest, Swarm service edge_camera-<name>'
-        description 'ArUco marker pose detection. Publishes each frame with a detected marker to camera/<id>_<name>; no marker in view means no messages.'
+        description 'ArUco marker pose detection. Publishes each frame with a detected marker to camera/<id>_<name>; no marker in view means no messages. With CAMERA_PLC_TRIGGER on (recording), waits for the PLC Data_Start first.'
         link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
       }
 

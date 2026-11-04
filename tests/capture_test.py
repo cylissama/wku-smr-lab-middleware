@@ -11,8 +11,8 @@ IMU_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 0.1, 0.2, 0.3, 4, 5, 6, 7, 8, 9, 
 CAMERA_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 3, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6"
 
 # Stack settings sent with each deploy with no run parameters set (fast_server.main.stack_env)
-MONITOR_ENV = {"IMU_PLC_TRIGGER": "false"}
-RECORD_ENV = {"IMU_PLC_TRIGGER": "true"}
+MONITOR_ENV = {"IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"}
+RECORD_ENV = {"IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}
 
 
 def drain(queue: asyncio.Queue) -> list:
@@ -408,7 +408,7 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["mode"], "monitor")
         deploy.assert_awaited_once()
         # Monitoring streams right away, without waiting for the PLC
-        self.assertEqual(deploy.await_args.args[1], {"IMU_PLC_TRIGGER": "false"})
+        self.assertEqual(deploy.await_args.args[1], MONITOR_ENV)
         self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
 
     async def test_listen_start_deploy_failure_returns_to_idle(self):
@@ -459,7 +459,7 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["success"])
         deploy.assert_awaited_once()
-        self.assertEqual(deploy.await_args.args[1], {"IMU_PLC_TRIGGER": "true"})
+        self.assertEqual(deploy.await_args.args[1], RECORD_ENV)
         self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 11))
 
     async def test_start_session_from_monitor_skips_redeploy_when_settings_match(self):
@@ -565,9 +565,13 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.db = MagicMock()
         self.db.create_session = AsyncMock(return_value=21)
         self.db.end_session = AsyncMock()
+        self.db.get_device_ids = AsyncMock(return_value={"106": 280, "main": 5})
         m.app.state.db = self.db
         m.capture.set(CaptureMode.IDLE)
         m.deployed_env, m.run_overrides = None, {}
+        m.device_ids, m.device_ids_read = {}, (frozenset(), float("-inf"))
+        self.patches.append(patch.dict(m.health.components["db"], status="ok"))
+        self.patches[-1].start()
 
     async def asyncTearDown(self):
         for p in self.patches:
@@ -631,6 +635,36 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
 
         robot = next(d for d in result["data"] if d["key"] == "robot/main")
         self.assertFalse(robot["receiving"])
+
+    async def test_get_devices_reports_db_ids(self):
+        result = await m.get_devices()
+
+        ids = {d["key"]: d["db_id"] for d in result["data"]}
+        self.assertEqual(ids, {"imu/106": 280, "imu/107": None, "camera/113": None, "robot/main": 5})
+        self.db.get_device_ids.assert_awaited_once()
+        self.assertEqual(set(self.db.get_device_ids.await_args.args[0]), {"106", "107", "113", "main"})
+
+    async def test_get_devices_caches_db_ids(self):
+        await m.get_devices()
+        await m.get_devices()
+
+        self.db.get_device_ids.assert_awaited_once()
+
+    async def test_get_devices_without_db_has_no_ids(self):
+        m.app.state.db = None
+
+        result = await m.get_devices()
+
+        self.assertTrue(result["success"])
+        self.assertEqual({d["db_id"] for d in result["data"]}, {None})
+
+    async def test_get_devices_survives_db_id_lookup_error(self):
+        self.db.get_device_ids = AsyncMock(side_effect=OSError("connection reset"))
+
+        result = await m.get_devices()
+
+        self.assertTrue(result["success"])
+        self.assertEqual({d["db_id"] for d in result["data"]}, {None})
 
     async def test_get_devices_unknown_when_stack_controller_down(self):
         self.status = {"success": False, "error": "unreachable"}

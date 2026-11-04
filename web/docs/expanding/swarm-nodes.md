@@ -147,14 +147,14 @@ docker node ls
 IMUs need no node label; they're placed by hostname. Cameras are placed by label:
 
 ```bash
-docker node update --label-add camera=front <node-name>   # or camera=side
+docker node update --label-add camera=front <node-name>   # or camera=side, camera=cam3
 ```
 
 ## 5. Add the device to the edge stack
 
 On the AMS host, in `/home/ubuntu/wku-smr-lab-middleware`:
 
-1. In `deploy/swarm-edge-nodes.yml`, copy an existing `imu-1xx` service block and change every `IMU_1xx_` variable to the new id. Keep the `smr.category` / `smr.device` labels; they put the device on the dashboard.
+1. In `deploy/swarm-edge-nodes.yml`, copy an existing `imu-1xx` service block and change every `IMU_1xx_` variable to the new id. Keep the `smr.category` / `smr.device` labels; they put the device on the dashboard. Update its `smr.description` label too, then run `python architecture/sync.py` so the new Pi appears on the [architecture diagram](/expanding/architecture).
 2. Add `IMU_<id>_DEVICE_ID` and `IMU_<id>_HOSTNAME` to `deploy/.env`, and to `deploy/.env.example` (with the real hostname, no secrets).
 3. Reload the dashboard. The new device shows up in the Devices box; no restart is needed because stack-controller reads both files on each request.
 
@@ -175,8 +175,16 @@ On the AMS host, in `/home/ubuntu/wku-smr-lab-middleware`:
 
 The same Swarm steps apply (join, label `camera=<name>`, add a service block like `camera-front`, add the `CAMERA_<NAME>_*` variables to `deploy/.env`). The device key is `camera/<device_id>_<name>`.
 
+What a camera Pi needs before it joins (as found on RPICAM3):
+
+- **`camera-hw.service`** (systemd), running `python -m camera_host` from `/home/admin/wku-smr-lab-camera-edge-node/camera-swarm-fusion` (with its `.venv`), as `admin` with the `video` group. It opens `/dev/video0` (`CAMERA_DEVICE`) and creates the socket `/run/camera-hw/camera.sock` (`RuntimeDirectory=camera-hw`).
+- **`/opt/camera-sensor-fusion/data`**, which the container mounts at `/app/data`. `camera_edge` writes each run's frames to `data/sessions/<name>_session_<time>/` there.
+- **`camera-edge:latest`** in the Pi's local image store. The calibration files are inside the image (`/app/calib/`), so `CAMERA_<NAME>_CALIBRATION_PATH` is a path like `calib/c920s_1920x1080.yml`.
+
+Check it on the Pi with `systemctl status camera-hw`, `ls -l /run/camera-hw/camera.sock` and `docker images camera-edge`.
+
 ::: info Placeholder
-TODO: camera Pi host setup: what provides `/run/camera-hw`, the calibration file, and how `camera-edge:latest` gets onto the Pi.
+TODO: how `camera-edge:latest` is built or loaded onto a camera Pi.
 :::
 
 ## Troubleshooting
