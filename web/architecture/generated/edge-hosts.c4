@@ -76,5 +76,14 @@ deployment {
         description 'Side camera. camera_edge detects ArUco markers and publishes each frame\'s marker poses to camera/<device id>_side. When recording it waits for the PLC\'s Data_Start.'
       }
     }
+
+    host camera-cam3-pi 'Pi with label camera=cam3' {
+      technology 'edge_camera-cam3, device camera/115_cam3'
+      description 'Placement: node.labels.camera == cam3'
+      camera-cam3 = instanceOf edge.cameraNode {
+        title 'camera-cam3 (camera/115_cam3)'
+        description 'Third camera (RPICAM3). camera_edge detects ArUco markers and publishes each frame\'s marker poses to camera/<device id>_cam3. When recording it waits for the PLC\'s Data_Start.'
+      }
+    }
   }
 }

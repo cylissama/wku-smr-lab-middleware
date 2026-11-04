@@ -33,7 +33,7 @@ model {
     }
 
     cameraNode = zone 'Camera node' {
-      description 'A Pi with a camera. Two of them: camera-front (113) and camera-side (114).'
+      description 'A Pi with a camera. Three of them: camera-front (113), camera-side (114) and camera-cam3 (115).'
       link /docs/hardware/camera 'Camera nodes'
       link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
 

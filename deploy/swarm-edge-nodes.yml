@@ -448,3 +448,54 @@ services:
       retries: 3
       start_period: 30s
       start_interval: 1s
+
+
+  camera-cam3:
+    image: camera-edge:latest
+
+    environment:
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      DEVICE_ID: "${CAMERA_CAM3_DEVICE_ID}"
+      CAMERA_NAME: ${CAMERA_CAM3_NAME}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_CAM3_CALIBRATION_PATH}
+      CAMERA_MARKER_LENGTH_M: "${CAMERA_MARKER_LENGTH_M}"
+      CAMERA_EDGE_HEALTH_PATH: /tmp/camera-edge-health.json
+      CAMERA_PLC_TRIGGER: ${CAMERA_PLC_TRIGGER:-false}
+      CAMERA_PLC_PATH: ${CAMERA_PLC_PATH:-192.168.1.103}
+      CAMERA_PLC_TAG_START: ${CAMERA_PLC_TAG_START:-Data_Start}
+      CAMERA_PLC_TAG_STOP: ${CAMERA_PLC_TAG_STOP:-Db_Stop}
+      CAMERA_PLC_POLL_S: ${CAMERA_PLC_POLL_S:-0.05}
+      CAMERA_PLC_MAX_RUN_S: ${CAMERA_PLC_MAX_RUN_S:-600}
+      CAMERA_PLC_FAKE: ${CAMERA_PLC_FAKE:-false}
+    deploy:
+      replicas: 1
+      labels:
+        smr.description: "Third camera (RPICAM3). camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_cam3. When recording it waits for the PLC's Data_Start."
+        smr.category: camera
+        # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
+        # camera/113_front), and that's also its device label in the DB
+        smr.device: "${CAMERA_CAM3_DEVICE_ID}_${CAMERA_CAM3_NAME}"
+
+      restart_policy:
+        condition: any
+
+      placement:
+        constraints:
+          - node.labels.camera == cam3
+
+    volumes:
+      - type: bind
+        source: /run/camera-hw
+        target: /run/camera-hw
+
+      - type: bind
+        source: /opt/camera-sensor-fusion/data
+        target: /app/data
+
+    healthcheck:
+      test: [CMD, python3, -m, camera_edge, healthcheck]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
