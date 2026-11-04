@@ -50,7 +50,7 @@ model {
       cameraEdge = service 'camera_edge' {
         #perRun
         technology 'camera-edge:latest, Swarm service edge_camera-<name>'
-        description 'ArUco marker pose detection. Publishes each frame with a detected marker to camera/<id>_<name>; no marker in view means no messages.'
+        description 'ArUco marker pose detection. Publishes each frame with a detected marker to camera/<id>_<name>; no marker in view means no messages. With CAMERA_PLC_TRIGGER on (recording), waits for the PLC Data_Start first.'
         link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
       }
 
