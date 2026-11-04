@@ -139,7 +139,7 @@ Response:
 {"key": "robot/main", "category": "robot", "device_label": "main", "stack": null, "service": null, ...}
 ```
 
-`GET /devices` then adds live status to each entry (see [Status indicators](#status-indicators)) and returns the list plus the currently captured selection. The dashboard calls it on load and then every **3 s** while monitoring or recording, every **10 s** when idle.
+`GET /devices` then adds live status to each entry (see [Status indicators](#status-indicators)) and its `db_id` (the `device.id` row with that `device_label`, `null` if none yet; read from the database at most every `DEVICE_ID_REFRESH_S`, default 30 s, and left out quietly while the database is down), and returns the list plus the currently captured selection. The dashboard calls it on load and then every **3 s** while monitoring or recording, every **10 s** when idle.
 
 ## Step 2 — The selection leaves the browser
 

@@ -36,11 +36,13 @@ The **System Health** strip under the buttons shows whether the API can reach th
 
 ## Devices
 
-Every IMU, camera and the robot, with a checkbox and a status. Only the ticked devices are started, shown and recorded. The selection is locked while monitoring or recording. The statuses and colors are explained in [Running a test session](/operations/running-a-test#devices). How the selection works is in [Stack controller & device selection](/docker/stack-controller).
+Every IMU, camera and the robot, with a checkbox and a status. Only the ticked devices are started, shown and recorded. The selection is locked while monitoring or recording. Each device also shows its **database ID** (`ID 280`), see [Field Devices](#field-devices-left). The statuses and colors are explained in [Running a test session](/operations/running-a-test#devices). How the selection works is in [Stack controller & device selection](/docker/stack-controller).
 
 ## Field Devices (left)
 
 A card with a graphic per device, colored the same way as the Devices box: grey offline, blue standby, green sending (with its message rate), red fault. Unselected devices are dimmed. It only shows status; selection happens in the Devices box.
+
+The badge in each tile's top-right corner is the device's **database ID**: its `device.id`, which is the `device_id` column in `imu_measurement`, `image_detection` and `robot`. Use it to filter a device's rows directly (`WHERE device_id = 280`) without joining `device`. A device shows `ID —` until a session has stored its data once, because that's when its `device` row is created.
 
 ## Run Parameters (right)
 
