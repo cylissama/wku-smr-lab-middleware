@@ -16,8 +16,8 @@ PARAMS: dict[str, dict[str, Any]] = {
         "edge": True, "help": "Readings per second from every IMU",
     },
     "IMU_PLC_TRIGGER_ON_RECORD": {
-        "label": "Wait for PLC start", "group": "imu", "type": "bool", "edge": False,
-        "help": "When recording, the IMUs start sending on the PLC's Data_Start. Monitoring never waits.",
+        "label": "Wait for PLC start", "group": "plc", "type": "bool", "edge": False,
+        "help": "When recording, the IMUs and cameras start sending on the PLC's Data_Start. Monitoring never waits.",
     },
     "IMU_PLC_MAX_RUN_S": {
         "label": "Max PLC run", "group": "imu", "type": "int", "min": 30, "max": 3600, "unit": "s",

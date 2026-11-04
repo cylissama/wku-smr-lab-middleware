@@ -227,11 +227,11 @@ deployed_env: dict[str, str] | None = None
 
 # Edge-stack settings for a deploy in this capture mode (stack-controller only
 # accepts the variables a stack lists under env_overrides in stacks.yml): the
-# edge run parameters, plus IMU_PLC_TRIGGER. Monitoring streams right away,
-# unless MONITOR_PLC_IP names a simulated PLC: then the IMUs and cameras use it
-# and wait for its Data_Start. In a recording session the IMU nodes wait for
-# the real PLC's (the .env PLC paths) Data_Start pulse before sending, unless
-# IMU_PLC_TRIGGER_ON_RECORD is off (e.g. with no robot).
+# edge run parameters, plus IMU_PLC_TRIGGER and CAMERA_PLC_TRIGGER. Monitoring
+# streams right away, unless MONITOR_PLC_IP names a simulated PLC: then the IMUs
+# and cameras use it and wait for its Data_Start. In a recording session the IMU
+# and camera nodes wait for the real PLC's (the .env PLC paths) Data_Start pulse
+# before sending, unless IMU_PLC_TRIGGER_ON_RECORD is off (e.g. with no robot).
 def stack_env(mode: CaptureMode) -> dict[str, str]:
     env = {k: run_params.env_value(v) for k, v in run_overrides.items() if k in run_params.EDGE_PARAMS}
     sim_plc = monitor_plc_ip()
@@ -240,7 +240,7 @@ def stack_env(mode: CaptureMode) -> dict[str, str]:
         return env
     wait = mode == CaptureMode.RECORD and run_overrides.get(
         "IMU_PLC_TRIGGER_ON_RECORD", env_flag("IMU_PLC_TRIGGER_ON_RECORD", True))
-    env["IMU_PLC_TRIGGER"] = "true" if wait else "false"
+    env["IMU_PLC_TRIGGER"] = env["CAMERA_PLC_TRIGGER"] = "true" if wait else "false"
     return env
 
 # The simulated PLC monitoring uses, or "" for none
@@ -1142,12 +1142,12 @@ async def _start_session(
                 "success": False,
             }
 
-        # The IMU nodes only see a Data_Start that comes after they've
-        # (re)started, so the robot has to wait for them
+        # The IMU and camera nodes only see a Data_Start that comes after
+        # they've (re)started, so the robot has to wait for them
         if record_env["IMU_PLC_TRIGGER"] == "true" and (
-            selected is None or any(key.startswith("imu/") for key in selected)
+            selected is None or any(key.startswith(("imu/", "camera/")) for key in selected)
         ):
-            await broadcast_message(misc_manager, "IMUs are (re)starting to wait for the robot's PLC Data_Start -- "
+            await broadcast_message(misc_manager, "IMUs and cameras are (re)starting to wait for the robot's PLC Data_Start -- "
                                                   "start the robot after the \"Edge ready\" message", "info")
 
         return {
