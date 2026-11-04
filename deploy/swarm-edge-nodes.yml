@@ -368,7 +368,7 @@ services:
     deploy:
       replicas: 1
       labels:
-        smr.description: "Front camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_front."
+        smr.description: "Front camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_front. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
         # camera/113_front), and that's also its device label in the DB
@@ -419,7 +419,7 @@ services:
     deploy:
       replicas: 1
       labels:
-        smr.description: "Side camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_side."
+        smr.description: "Side camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_side. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
         # camera/113_front), and that's also its device label in the DB
