@@ -53,7 +53,7 @@ There are three separate questions, answered in three different places:
  Raspberry Pis (Swarm workers)
      RPIIMUJ1 runs edge_imu-106  ──MQTT imu/106──►  mosquitto ──► fastapi-app
      RPiCamFront runs edge_camera-front ──MQTT camera/113_front──► ...
-     (RPIIMUJ2..5, CameraPi2: nothing scheduled)
+     (RPIIMUJ2..5, CameraPi2, RPICAM3: nothing scheduled)
 ```
 
 ## Device keys: one name for a device everywhere
@@ -300,7 +300,7 @@ A deploy with **no body** is the same minus steps 1, 3 and 5: the original `/sta
 
 Once `docker stack deploy` hands the service specs to the manager, Swarm takes over:
 
-- **Placement.** IMU services are pinned by hostname (`node.hostname == ${IMU_106_HOSTNAME}` → `RPIIMUJ1`, …); cameras by node label (`node.labels.camera == front` → `RPiCamFront`, `== side` → `CameraPi2`). A service whose constraint matches no node stays at `0/1` with "no suitable node" in `docker service ps`.
+- **Placement.** IMU services are pinned by hostname (`node.hostname == ${IMU_106_HOSTNAME}` → `RPIIMUJ1`, …); cameras by node label (`node.labels.camera == front` → `RPiCamFront`, `== side` → `CameraPi2`, `== cam3` → `RPICAM3`). A service whose constraint matches no node stays at `0/1` with "no suitable node" in `docker service ps`.
 - **Task lifecycle.** Each service gets one task (`replicas: 1`): `new → pending → assigned → accepted → preparing → starting → running`. Because every edge service has a **healthcheck**, Swarm keeps the task in *starting* until the first check passes. Checks run every **1 s** during the warm-up (`start_interval`, `start_period`: 15 s for IMUs, 30 s for cameras, during which failures don't count) and every **10 s** after (`interval`). This is the delay you see as **starting** in the dashboard. Docker older than 25 (`RPIIMUJ3`) ignores `start_interval` and checks every 10 s from the start.
 - **Restarts.** IMUs restart `on-failure`, cameras on `any` exit.
 

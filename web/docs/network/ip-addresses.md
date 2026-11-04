@@ -30,7 +30,7 @@ This page contains plaintext credentials for lab network equipment. It is commit
 | RPI_IMU_GT | 192.168.1.112 | | | | Needs to be built and connected |
 | CAMERAFRONT | 192.168.1.113 | 2C:CF:67:4F:7F:BC | admin | admin | |
 | CAMERAPI2 | 192.168.1.114 | 88:a2:9e:02:e2:93 | admin | admin | |
-| CameraPi3 | 192.168.1.115 | | admin | password | Needs to be built and connected; secondary IP `192.168.4.42` |
+| RPICAM3 (was CameraPi3) | 192.168.1.94 | | admin | password | Swarm worker, label `camera=cam3` (service `camera-cam3`, `camera/115_cam3`); secondary IP `192.168.4.42` |
 | CameraPi4 | 192.168.1.116 | | | | Needs to be built and connected |
 | CameraPi5 | 192.168.1.117 | | | | Needs to be built and connected |
 | — | 192.168.1.118 | | | | |
