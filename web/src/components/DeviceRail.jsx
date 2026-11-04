@@ -1,21 +1,26 @@
 import { DeviceGraphic } from "./deviceGraphics";
-import { CATEGORY_NAMES, TONE_COLORS, deviceName, deviceVisualState, groupDevices } from "../lib/deviceState";
+import { CATEGORY_NAMES, TONE_COLORS, deviceDbId, deviceName, deviceVisualState, groupDevices } from "../lib/deviceState";
 
 const MODE_TEXT = { idle: "Idle", monitor: "Monitoring", record: "Recording", stopping: "Stopping" };
 const TONE_ORDER = ["green", "blue", "red", "grey"];
 const TONE_TEXT = { green: "sending", blue: "standby", red: "fault", grey: "offline" };
 
 function DeviceTile({ device, state, dimmed, large }) {
+    const dbId = deviceDbId(device);
+
     return (
         <div
             className={`dev-tile ${large ? "dev-tile-large" : ""} ${dimmed ? "dev-dim" : ""}`}
             data-tone={state.tone}
             style={{ "--tone": TONE_COLORS[state.tone] }}
-            title={`${device.key} · ${state.title}`}
+            title={`${device.key} · ${dbId.text} · ${state.title}`}
         >
             <div className="dev-tile-graphic">
                 <DeviceGraphic category={device.category} />
             </div>
+            <span className={`dev-db-id ${device.db_id == null ? "dev-db-id-none" : ""}`} title={dbId.title}>
+                {dbId.text}
+            </span>
             <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-gray-900">
                     {deviceName(device)}

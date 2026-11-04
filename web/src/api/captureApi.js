@@ -6,7 +6,7 @@ export async function getCapture() {
 }
 
 // Selectable devices with their state: [{ key: "imu/106", category, device_label,
-// service, stack, state }]
+// service, stack, state, db_id }] (db_id: device.id in the database, or null)
 export async function getDevices() {
     return apiGet("/devices");
 }

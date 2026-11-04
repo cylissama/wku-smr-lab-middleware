@@ -56,6 +56,14 @@ export function deviceVisualState(device, listening) {
     return { tone: base.tone, text: base.text, caption: base.caption, title };
 }
 
+// Its row id in the database's device table (what device_id in the data
+// tables refers to). A device has none until a session has stored its data.
+export function deviceDbId(device) {
+    return device.db_id == null
+        ? { text: "ID —", title: "Not in the database yet: it gets an ID the first time a session records it" }
+        : { text: `ID ${device.db_id}`, title: `device.id = ${device.db_id} in the database (device_id in its data rows)` };
+}
+
 export function deviceName(device) {
     return device.service ?? device.category;
 }

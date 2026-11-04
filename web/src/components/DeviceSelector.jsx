@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { CATEGORY_NAMES, TONE_DOTS, deviceName, deviceVisualState, groupDevices } from "../lib/deviceState";
+import { CATEGORY_NAMES, TONE_DOTS, deviceDbId, deviceName, deviceVisualState, groupDevices } from "../lib/deviceState";
 
 // Checkbox that can also show "some selected"
 function TriStateCheckbox({ checked, indeterminate, disabled, onChange, label }) {
@@ -115,6 +115,12 @@ export default function DeviceSelector({ devices, selected, onChange, locked, li
                                                     />
                                                     {deviceName(device)}
                                                     <span className="text-xs text-gray-400">{device.key}</span>
+                                                    <span
+                                                        className="whitespace-nowrap font-mono text-xs text-gray-500"
+                                                        title={deviceDbId(device).title}
+                                                    >
+                                                        {deviceDbId(device).text}
+                                                    </span>
                                                 </span>
                                                 <span
                                                     className="inline-flex items-center gap-1.5 text-xs text-gray-600"
