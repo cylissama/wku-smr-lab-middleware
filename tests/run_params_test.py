@@ -170,17 +170,17 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_put_while_monitoring_redeploys_selection_with_new_env(self):
         m.capture.set(CaptureMode.MONITOR, devices=None)
-        m.deployed_env = {"IMU_PLC_TRIGGER": "false"}
+        m.deployed_env = {"IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"}
 
         result = await m.put_parameters(m.RunParamsUpdate(values={"IMU_SAMPLE_HZ": 50}))
 
         self.assertTrue(result["redeployed"])
-        self.assertEqual(self.deploys, [{"env": {"IMU_SAMPLE_HZ": "50", "IMU_PLC_TRIGGER": "false"}}])
-        self.assertEqual(m.deployed_env, {"IMU_SAMPLE_HZ": "50", "IMU_PLC_TRIGGER": "false"})
+        self.assertEqual(self.deploys, [{"env": {"IMU_SAMPLE_HZ": "50", "IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"}}])
+        self.assertEqual(m.deployed_env, {"IMU_SAMPLE_HZ": "50", "IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"})
 
     async def test_put_while_monitoring_skips_redeploy_for_record_only_change(self):
         m.capture.set(CaptureMode.MONITOR, devices=None)
-        m.deployed_env = {"IMU_PLC_TRIGGER": "false"}
+        m.deployed_env = {"IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"}
 
         result = await m.put_parameters(m.RunParamsUpdate(values={"IMU_PLC_TRIGGER_ON_RECORD": False}))
 
@@ -189,11 +189,18 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stack_env_per_mode(self):
         m.run_overrides = {"IMU_SAMPLE_HZ": 200, "IMU_PLC_TRIGGER_ON_RECORD": True}
-        self.assertEqual(m.stack_env(CaptureMode.MONITOR), {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "false"})
-        self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "true"})
+        self.assertEqual(m.stack_env(CaptureMode.MONITOR), {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"})
+        self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"})
 
         m.run_overrides = {"IMU_PLC_TRIGGER_ON_RECORD": False}
-        self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_PLC_TRIGGER": "false"})
+        self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"})
+
+    async def test_wait_toggle_off_records_without_either_trigger(self):
+        # One toggle covers both: with it off, neither IMUs nor cameras wait for the PLC
+        m.run_overrides = {"IMU_PLC_TRIGGER_ON_RECORD": False}
+        env = m.stack_env(CaptureMode.RECORD)
+        self.assertEqual((env["IMU_PLC_TRIGGER"], env["CAMERA_PLC_TRIGGER"]), ("false", "false"))
+        self.assertEqual(env, m.stack_env(CaptureMode.MONITOR))
 
     async def test_stack_env_monitoring_a_simulated_plc(self):
         m.run_overrides = {"MONITOR_PLC_IP": "192.168.1.50"}
@@ -203,10 +210,10 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
             "CAMERA_PLC_TRIGGER": "true", "CAMERA_PLC_PATH": "192.168.1.50",
         })
         # Recording ignores it: the .env PLC paths (the real PLC) apply
-        self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_PLC_TRIGGER": "true"})
+        self.assertEqual(m.stack_env(CaptureMode.RECORD), {"IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"})
 
         m.run_overrides = {"MONITOR_PLC_IP": ""}
-        self.assertEqual(m.stack_env(CaptureMode.MONITOR), {"IMU_PLC_TRIGGER": "false"})
+        self.assertEqual(m.stack_env(CaptureMode.MONITOR), {"IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"})
 
     async def test_put_refuses_the_real_plc(self):
         with patch.object(m, "REAL_PLC_IP", "192.168.1.103"):
@@ -218,7 +225,7 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_put_while_monitoring_a_new_plc_ip_redeploys(self):
         m.capture.set(CaptureMode.MONITOR, devices=None)
-        m.deployed_env = {"IMU_PLC_TRIGGER": "false"}
+        m.deployed_env = {"IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"}
 
         result = await m.put_parameters(m.RunParamsUpdate(values={"MONITOR_PLC_IP": "192.168.1.50"}))
 
@@ -251,7 +258,7 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         params = self.db.create_session.await_args.kwargs["parameters"]
         self.assertEqual((params["IMU_SAMPLE_HZ"], params["IMU_PLC_MAX_RUN_S"]), (200, 600))
-        self.assertEqual(self.deploys, [{"env": {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "true"}}])
+        self.assertEqual(self.deploys, [{"env": {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}}])
 
     async def test_start_session_leaves_out_the_monitoring_plc(self):
         m.run_overrides = {"MONITOR_PLC_IP": "192.168.1.50"}
@@ -259,7 +266,7 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
         await m.start_session("lbl", session_label="Full System")
 
         self.assertNotIn("MONITOR_PLC_IP", self.db.create_session.await_args.kwargs["parameters"])
-        self.assertEqual(self.deploys, [{"env": {"IMU_PLC_TRIGGER": "true"}}])
+        self.assertEqual(self.deploys, [{"env": {"IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}}])
 
 
 if __name__ == "__main__":

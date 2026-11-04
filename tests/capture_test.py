@@ -11,8 +11,8 @@ IMU_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 0.1, 0.2, 0.3, 4, 5, 6, 7, 8, 9, 
 CAMERA_PAYLOAD = b"1, 1700779200.1, 1700779200.2, 3, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6"
 
 # Stack settings sent with each deploy with no run parameters set (fast_server.main.stack_env)
-MONITOR_ENV = {"IMU_PLC_TRIGGER": "false"}
-RECORD_ENV = {"IMU_PLC_TRIGGER": "true"}
+MONITOR_ENV = {"IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"}
+RECORD_ENV = {"IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}
 
 
 def drain(queue: asyncio.Queue) -> list:
@@ -408,7 +408,7 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["mode"], "monitor")
         deploy.assert_awaited_once()
         # Monitoring streams right away, without waiting for the PLC
-        self.assertEqual(deploy.await_args.args[1], {"IMU_PLC_TRIGGER": "false"})
+        self.assertEqual(deploy.await_args.args[1], MONITOR_ENV)
         self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
 
     async def test_listen_start_deploy_failure_returns_to_idle(self):
@@ -459,7 +459,7 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result["success"])
         deploy.assert_awaited_once()
-        self.assertEqual(deploy.await_args.args[1], {"IMU_PLC_TRIGGER": "true"})
+        self.assertEqual(deploy.await_args.args[1], RECORD_ENV)
         self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 11))
 
     async def test_start_session_from_monitor_skips_redeploy_when_settings_match(self):
