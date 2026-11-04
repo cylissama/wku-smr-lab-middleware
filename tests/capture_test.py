@@ -565,9 +565,13 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.db = MagicMock()
         self.db.create_session = AsyncMock(return_value=21)
         self.db.end_session = AsyncMock()
+        self.db.get_device_ids = AsyncMock(return_value={"106": 280, "main": 5})
         m.app.state.db = self.db
         m.capture.set(CaptureMode.IDLE)
         m.deployed_env, m.run_overrides = None, {}
+        m.device_ids, m.device_ids_read = {}, (frozenset(), float("-inf"))
+        self.patches.append(patch.dict(m.health.components["db"], status="ok"))
+        self.patches[-1].start()
 
     async def asyncTearDown(self):
         for p in self.patches:
@@ -631,6 +635,36 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
 
         robot = next(d for d in result["data"] if d["key"] == "robot/main")
         self.assertFalse(robot["receiving"])
+
+    async def test_get_devices_reports_db_ids(self):
+        result = await m.get_devices()
+
+        ids = {d["key"]: d["db_id"] for d in result["data"]}
+        self.assertEqual(ids, {"imu/106": 280, "imu/107": None, "camera/113": None, "robot/main": 5})
+        self.db.get_device_ids.assert_awaited_once()
+        self.assertEqual(set(self.db.get_device_ids.await_args.args[0]), {"106", "107", "113", "main"})
+
+    async def test_get_devices_caches_db_ids(self):
+        await m.get_devices()
+        await m.get_devices()
+
+        self.db.get_device_ids.assert_awaited_once()
+
+    async def test_get_devices_without_db_has_no_ids(self):
+        m.app.state.db = None
+
+        result = await m.get_devices()
+
+        self.assertTrue(result["success"])
+        self.assertEqual({d["db_id"] for d in result["data"]}, {None})
+
+    async def test_get_devices_survives_db_id_lookup_error(self):
+        self.db.get_device_ids = AsyncMock(side_effect=OSError("connection reset"))
+
+        result = await m.get_devices()
+
+        self.assertTrue(result["success"])
+        self.assertEqual({d["db_id"] for d in result["data"]}, {None})
 
     async def test_get_devices_unknown_when_stack_controller_down(self):
         self.status = {"success": False, "error": "unreachable"}

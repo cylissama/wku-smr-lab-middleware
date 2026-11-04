@@ -697,7 +697,19 @@ class DatabaseSingleton:
             self.history.add((device_id, session_id))
         
 
-    # Return the device_id if found or None 
+    # {label: device.id} for those of these labels that are registered. A
+    # device gets its row the first time a session stores data from it.
+    async def get_device_ids(self, labels) -> dict[str, int]:
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT label, id FROM device WHERE label = ANY($1::text[])",
+                list(labels)
+            )
+
+        return {r["label"]: r["id"] for r in rows}
+
+    # Return the device_id if found or None
     async def check_device(self, device_label) -> int | None:
 
         async with self.pool.acquire() as conn:

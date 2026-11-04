@@ -662,6 +662,33 @@ def device_swarm_state(status: dict[str, Any], service: str) -> dict[str, Any]:
             return {"state": svc["state"], "since": svc.get("since"), "error": svc.get("error")}
     return {"state": "not_deployed"}
 
+# Each device's row id in the device table, so the dashboard can show it (it's
+# what the data tables' device_id refers to). Re-read at most every
+# DEVICE_ID_REFRESH_S: a device gets its row the first time a session stores
+# its data, and a restore can renumber them. Best effort: {} while the DB is
+# down, and /devices works without it.
+DEVICE_ID_REFRESH_S = float(os.getenv("DEVICE_ID_REFRESH_S", 30))
+DEVICE_ID_TIMEOUT_S = 2.0
+device_ids: dict[str, int] = {}
+# (labels asked for, time.monotonic()) of the last lookup
+device_ids_read: tuple[frozenset[str], float] = (frozenset(), float("-inf"))
+
+async def lookup_device_ids(labels: list[str]) -> dict[str, int]:
+    global device_ids, device_ids_read
+    asked, read_at = device_ids_read
+    now = time.monotonic()
+    if asked == frozenset(labels) and now - read_at < DEVICE_ID_REFRESH_S:
+        return device_ids
+    db = app.state.db
+    if db is None or health.components["db"]["status"] == "down":
+        return device_ids
+    device_ids_read = (frozenset(labels), now)
+    try:
+        device_ids = await asyncio.wait_for(db.get_device_ids(labels), DEVICE_ID_TIMEOUT_S)
+    except Exception as e:
+        loggers.log_system_logger(f"Device id lookup failed: {describe_exc(e)}")
+    return device_ids
+
 # API to list selectable devices with their current state, for the dashboard
 @app.get("/devices")
 async def get_devices() -> dict[str, Any]:
@@ -670,13 +697,17 @@ async def get_devices() -> dict[str, Any]:
     except Exception as e:
         return {"error": str(e), "success": False}
 
-    *stack_statuses, robot_status = await asyncio.gather(
+    *stack_statuses, robot_status, ids = await asyncio.gather(
         *(stack_controller_request("GET", f"/stacks/{s}/status") for s in MANAGED_STACKS),
         get_robot_queue_status(),
+        lookup_device_ids([d["device_label"] for d in catalog]),
     )
     statuses = dict(zip(MANAGED_STACKS, stack_statuses))
 
     for device in catalog:
+        # Row id in the device table (data tables' device_id); None until the
+        # device's data has been stored once
+        device["db_id"] = ids.get(device["device_label"])
         # Is its data actually arriving? Only tracked while monitoring/recording.
         if device["stack"]:
             device.update(live_sampler.activity(device["key"], RECEIVING_TIMEOUT))
