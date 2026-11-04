@@ -63,7 +63,7 @@ In the **Devices** box a device stays grey or red while monitoring or recording,
 
 ## No IMU data after Start Session
 
-IMU data arrived while monitoring but stops once the session starts. This is usually expected: when recording, the IMUs wait for the PLC's `Data_Start` before streaming, so data begins when the robot program starts, not when you click Start Session. If it never starts, check the PLC and the trigger settings: [IMU PLC trigger](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
+IMU or camera data arrived while monitoring but stops once the session starts. This is usually expected: when recording, the IMUs and cameras wait for the PLC's `Data_Start` before streaming, so data begins when the robot program starts, not when you click Start Session. If it never starts, check the PLC and the trigger settings: [PLC trigger](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
 ## PLC entry red, or the session didn't stop by itself
 

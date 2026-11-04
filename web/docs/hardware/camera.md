@@ -11,6 +11,8 @@ Raspberry Pis with cameras run the camera sensor-fusion pipeline: ArUco marker p
 
 Device ids, names and calibration files come from `deploy/.env` (`CAMERA_FRONT_DEVICE_ID`, `CAMERA_FRONT_NAME`, `CAMERA_FRONT_CALIBRATION_PATH`, …). The containers (image `camera-edge:latest`) mount `/run/camera-hw` and `/opt/camera-sensor-fusion/data` from the Pi.
 
+With `CAMERA_PLC_TRIGGER=true`, a camera waits for the [PLC](/hardware/plc)'s `Data_Start` pulse before sending and stops on `Db_Stop` (or after `CAMERA_PLC_MAX_RUN_S`). `fastapi-app` sets this on every deploy, the same as the IMUs': off while monitoring, on for a session unless the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD` says otherwise. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
+
 ::: warning Calibration placeholders
 `deploy/.env.example` points both cameras at `calib/PLACEHOLDER_front_1920x1080.yml`. Check that each camera has its own real calibration file.
 :::

@@ -199,7 +199,7 @@ Then, in order:
 | a list of services | `POST /stacks/edge/deploy` with `{"services": [...], "env": {...}}` |
 | an **empty** list (e.g. robot-only run) | `POST /stacks/edge/remove` → the whole stack is taken down, since none of it should run |
 
-`env` holds the **per-deploy settings** from `stack_env(mode)`: `IMU_PLC_TRIGGER` (`false` when monitoring; for a session, from the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD`), plus any edge [run parameters](/operations/run-parameters) changed from their `deploy/.env` default (e.g. `IMU_SAMPLE_HZ`).
+`env` holds the **per-deploy settings** from `stack_env(mode)`: `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` (`false` when monitoring; for a session, from the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD`), plus any edge [run parameters](/operations/run-parameters) changed from their `deploy/.env` default (e.g. `IMU_SAMPLE_HZ`).
 
 Every call goes through `stack_controller_request()`: an `aiohttp` request to `http://${STACK_CONTROLLER_HOST}:${STACK_CONTROLLER_PORT}` (defaults `stack-controller:8080`) with header `Authorization: Bearer ${STACK_CONTROLLER_TOKEN}`. It never raises — failures come back as `{"success": false, "error": "..."}` and are logged to the system logger.
 
@@ -239,7 +239,8 @@ stacks:
     env_file: /stacks/.env
     stack_name: edge
     deploy_flags: ["--resolve-image", "never"]
-    env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S]
+    env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S,
+                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH]
 ```
 
 The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name` is the Swarm stack namespace (services become `edge_<service>`). `--resolve-image never` makes Swarm use the image tags already present on each Pi instead of contacting a registry. `env_overrides` lists the only variables a deploy request may set in its `env`; anything else gets `400`. This keeps `fastapi-app` from changing hostnames, broker addresses or other infrastructure values. The file is re-read on every request — but it's a single-file bind mount, so if an editor *replaces* the file instead of editing it in place, the container keeps seeing the old copy until `stack-controller` is restarted.
