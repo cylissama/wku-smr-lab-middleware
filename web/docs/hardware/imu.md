@@ -13,9 +13,9 @@ Each robot joint has a Raspberry Pi with a BNO08x 9-DoF IMU on I2C. Code: [wku-s
 | `imu-108` | `imu/108` | RPIIMUJ3 | 192.168.1.108 |
 | `imu-109` | `imu/109` | RPIIMUJ4 | 192.168.1.109 |
 | `imu-110` | `imu/110` | RPIIMUJ5 | 192.168.1.110 |
-| `imu-111` | `imu/111` | RPI-IMU-BENCH | bench node, currently on 192.168.4.x |
+| `imu-111` | `imu/111` | RPIIMUJ6 | 192.168.1.111 |
 
-Device ids and hostnames come from `deploy/.env` (`IMU_106_DEVICE_ID`, `IMU_106_HOSTNAME`, …). Each service is pinned to its Pi with `node.hostname == ${IMU_<id>_HOSTNAME}`.
+Device ids and hostnames come from `deploy/.env` (`IMU_106_DEVICE_ID`, `IMU_106_HOSTNAME`, …). Each service is pinned to its Pi with `node.hostname == ${IMU_<id>_HOSTNAME}`. The joint is the service's `smr.joint` label; the dashboard's Field Devices tiles show it next to the Pi's IP.
 
 ## Two processes per Pi
 

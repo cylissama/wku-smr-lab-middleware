@@ -182,7 +182,6 @@ export default function ContainerHealth({ onShowLogs }) {
             <div className="mb-3 flex items-start justify-between gap-3 border-b border-gray-200 pb-3">
                 <div>
                     <h3 className="text-base font-semibold text-gray-900">Container Health</h3>
-                    <p className="text-xs text-gray-500">Docker health checks and restarts, per container</p>
                 </div>
                 <span className={`text-xs ${problems ? "font-semibold text-red-700" : "text-gray-400"}`}>
                     {problems

@@ -93,9 +93,6 @@ export default function MessageWB({ type }) {
                     <h3 className="text-base font-semibold text-gray-900">
                         {capitalizeType} Messages
                     </h3>
-                    <p className="text-xs text-gray-500">
-                        Live message feed
-                    </p>
                 </div>
 
                 <StatusIndicator
@@ -133,7 +130,6 @@ export default function MessageWB({ type }) {
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-xs text-gray-500">
-                    Showing up to 500 messages
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">

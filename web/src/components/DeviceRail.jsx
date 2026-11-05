@@ -7,13 +7,17 @@ const TONE_TEXT = { green: "sending", blue: "standby", red: "fault", grey: "offl
 
 function DeviceTile({ device, state, dimmed, large }) {
     const dbId = deviceDbId(device);
+    // Robot joint (IMUs) and the last octet of the Pi's IP (e.g. "106"), when known;
+    // the full IP stays in the tooltips
+    const octet = device.ip ? device.ip.split(".").pop() : null;
+    const where = [device.joint, octet].filter(Boolean).join(" · ");
 
     return (
         <div
             className={`dev-tile ${large ? "dev-tile-large" : ""} ${dimmed ? "dev-dim" : ""}`}
             data-tone={state.tone}
             style={{ "--tone": TONE_COLORS[state.tone] }}
-            title={`${device.key} · ${dbId.text} · ${state.title}`}
+            title={[device.key, dbId.text, device.joint, device.node, device.ip, state.title].filter(Boolean).join(" · ")}
         >
             <div className="dev-tile-graphic">
                 <DeviceGraphic category={device.category} />
@@ -25,6 +29,11 @@ function DeviceTile({ device, state, dimmed, large }) {
                 <div className="truncate text-sm font-semibold text-gray-900">
                     {deviceName(device)}
                 </div>
+                {where && (
+                    <div className="dev-where truncate" title={device.node ? `${device.node} · ${device.ip ?? "IP unknown"}` : undefined}>
+                        {where}
+                    </div>
+                )}
                 <div className="flex items-center gap-1.5 text-xs">
                     <span className="dev-led-dot"></span>
                     <span className="dev-caption truncate">{state.caption}</span>

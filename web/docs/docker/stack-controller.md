@@ -88,6 +88,7 @@ Each service in `deploy/swarm-edge-nodes.yml` carries two Swarm **service labels
       labels:
         smr.category: imu
         smr.device: "${IMU_106_DEVICE_ID}"
+        smr.joint: "J1"         # optional: robot joint, shown on the Field Devices tile
       ...
   camera-front:
     image: camera-edge:latest
@@ -114,7 +115,8 @@ A service without these labels is still deployed with the stack, but it isn't se
 
 1. `load_compose()` parses the YAML.
 2. The environment for interpolation is `os.environ` overlaid with the stack's `env_file` (`/stacks/.env`, i.e. `deploy/.env`), loaded fresh with `python-dotenv` on every call — so editing `deploy/.env` takes effect without restarting anything.
-3. `interpolate()` substitutes `${VAR}`, `${VAR:-default}` and `${VAR-default}` in the two label values.
+3. `interpolate()` substitutes `${VAR}`, `${VAR:-default}` and `${VAR-default}` in the label values.
+4. `placement_node()` finds the one Swarm node the service's placement constraints pin it to (`node.hostname == …` or `node.labels.<key> == …`, interpolated the same way) and returns its hostname as `node` and its Swarm address as `ip`. Both are `null` when the service isn't pinned to exactly one known node, or when Docker can't be reached.
 
 Response:
 
@@ -122,8 +124,10 @@ Response:
 {
   "stack": "edge",
   "services": [
-    {"service": "imu-106", "category": "imu", "device_label": "106"},
-    {"service": "camera-front", "category": "camera", "device_label": "113_front"},
+    {"service": "imu-106", "category": "imu", "device_label": "106",
+     "joint": "J1", "node": "RPIIMUJ1", "ip": "192.168.1.106"},
+    {"service": "camera-front", "category": "camera", "device_label": "113_front",
+     "joint": null, "node": "RPiCamFront", "ip": "192.168.1.114"},
     ...
   ],
   "success": true
@@ -135,8 +139,10 @@ Response:
 `load_device_catalog()` calls the endpoint above for every stack in `MANAGED_STACKS` (an env var on `fastapi-app`, currently `edge`), keeps the services that have both labels, and appends the robot:
 
 ```json
-{"key": "imu/106", "category": "imu", "device_label": "106", "stack": "edge", "service": "imu-106", ...}
-{"key": "robot/main", "category": "robot", "device_label": "main", "stack": null, "service": null, ...}
+{"key": "imu/106", "category": "imu", "device_label": "106", "stack": "edge", "service": "imu-106",
+ "joint": "J1", "node": "RPIIMUJ1", "ip": "192.168.1.106", ...}
+{"key": "robot/main", "category": "robot", "device_label": "main", "stack": null, "service": null,
+ "joint": null, "node": null, "ip": null, ...}
 ```
 
 `GET /devices` then adds live status to each entry (see [Status indicators](#status-indicators)) and its `db_id` (the `device.id` row with that `device_label`, `null` if none yet; read from the database at most every `DEVICE_ID_REFRESH_S`, default 30 s, and left out quietly while the database is down), and returns the list plus the currently captured selection. The dashboard calls it on load and then every **3 s** while monitoring or recording, every **10 s** when idle.
@@ -322,7 +328,7 @@ MQTT imu/106 message ──► handle_sensors()
    not monitoring/recording?          → drop (not even parsed)
    parse → device key "imu/106"
    capture.accepts("imu", "106")?     → no: drop (unselected)
-   live sampler: ≤1 "[live]" line/s to the dashboard's IMU panel
+   live sampler: ≤1 "[live]" line/s to the dashboard's IMU panel (monitor only)
    capture.should_store()?            → only in RECORD: tag with session_id, queue for Postgres
 ```
 
@@ -365,7 +371,7 @@ The receiving check is cheap by design: it reuses the per-device bookkeeping the
 | `STACKS_CONFIG_PATH` | stack-controller | `/config/stacks.yml` | the whitelist |
 | `TCP_HOST` / `ROBOT_STATUS_PORT` | fastapi-app (and tcp) | `tcp` / `8090` | tcp_server's status + capture endpoints |
 | `CAPTURE_SYNC_INTERVAL` | tcp | `5` | seconds between tcp_server's re-syncs of the capture state |
-| `LIVE_SAMPLE_INTERVAL` | fastapi-app, tcp | `1` | seconds between `[live]` lines per device |
+| `LIVE_SAMPLE_INTERVAL` | fastapi-app, tcp | `1` | seconds between `[live]` lines per device (monitor only) |
 | `RECEIVING_TIMEOUT` | fastapi-app, tcp | `3` | seconds of silence before a device stops counting as receiving |
 | `IMU_10x_DEVICE_ID`, `CAMERA_*_DEVICE_ID`, `IMU_10x_HOSTNAME`, … | `deploy/.env` | — | device IDs (→ topics and `smr.device`) and placement |
 
@@ -373,7 +379,7 @@ The receiving check is cheap by design: it reuses the per-device bookkeeping the
 
 No application code changes are needed:
 
-1. Add the service to `deploy/swarm-edge-nodes.yml` with its placement constraint, its MQTT topic, and the two labels — `smr.category` (`imu` or `camera`) and `smr.device` set to the **same value the topic uses**.
+1. Add the service to `deploy/swarm-edge-nodes.yml` with its placement constraint, its MQTT topic, and the two labels — `smr.category` (`imu` or `camera`) and `smr.device` set to the **same value the topic uses**. IMUs also get `smr.joint` (`J1` … `J6`).
 2. Add any new variables to `deploy/.env` on the AMS host.
 3. Make sure the Pi has joined the Swarm and matches the constraint ([Bringing a node online](/expanding/swarm-nodes)).
 

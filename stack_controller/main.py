@@ -77,19 +77,47 @@ def service_labels(spec: dict[str, Any] | None) -> dict[str, str]:
     return {str(k): str(v) for k, v in labels.items()}
 
 
+# The one node a service's placement constraints pin it to, from Swarm's node
+# list: understands `node.hostname == X` and `node.labels.K == V` (what the
+# edge stack uses). None if it isn't pinned, or not to exactly one known node.
+def placement_node(spec: dict[str, Any] | None, env: dict[str, str], nodes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    constraints = (((spec or {}).get("deploy") or {}).get("placement") or {}).get("constraints") or []
+    matches, pinned = list(nodes), False
+
+    for constraint in constraints:
+        m = re.fullmatch(r"\s*(node\.hostname|node\.labels\.\S+)\s*(==|!=)\s*(.*?)\s*", interpolate(str(constraint), env))
+        if not m:
+            continue
+        field, op, value = m.groups()
+        if field == "node.hostname":
+            node_value = lambda n: n.get("hostname")
+        else:
+            node_value = lambda n, key=field.removeprefix("node.labels."): (n.get("labels") or {}).get(key)
+        pinned = pinned or op == "=="
+        matches = [n for n in matches if (node_value(n) == value) == (op == "==")]
+
+    return matches[0] if pinned and len(matches) == 1 else None
+
+
 # One entry per service in the stack's compose file, with the device it runs
 # (from its smr.category / smr.device deploy labels, interpolated like the
-# real deploy would). Services without those labels get None for both.
-def list_services(name: str, cfg: dict[str, Any]) -> list[dict[str, Any]]:
+# real deploy would), its smr.joint label (IMUs: the robot joint it's mounted
+# on), and the node it's pinned to with that node's IP from Swarm. Missing
+# values are None; nodes=None (Docker unreachable) leaves node/ip None.
+def list_services(name: str, cfg: dict[str, Any], nodes: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     env = {**os.environ, **load_stack_env(name, cfg)}
     services = []
 
     for service, spec in (load_compose(cfg).get("services") or {}).items():
         labels = service_labels(spec)
+        node = placement_node(spec, env, nodes or [])
         services.append({
             "service": service,
             "category": interpolate(labels.get("smr.category", ""), env) or None,
             "device_label": interpolate(labels.get("smr.device", ""), env) or None,
+            "joint": interpolate(labels.get("smr.joint", ""), env) or None,
+            "node": node and node.get("hostname"),
+            "ip": node and node.get("addr"),
         })
 
     return services
@@ -220,7 +248,11 @@ async def stack_env(name: str) -> dict[str, Any]:
 @app.get("/stacks/{name}/services", dependencies=[Depends(verify_token)])
 async def services(name: str) -> dict[str, Any]:
     cfg = get_stack_config(name)
-    return {"stack": name, "services": list_services(name, cfg)}
+    try:
+        nodes = await asyncio.to_thread(docker_ops.list_nodes)
+    except Exception:
+        nodes = None  # still list the services, just without node/ip
+    return {"stack": name, "services": list_services(name, cfg, nodes)}
 
 
 # With a body listing services, deploys only those and prunes the rest of the

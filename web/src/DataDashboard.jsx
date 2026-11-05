@@ -30,10 +30,10 @@ const DEFAULT_SESSION_LABEL_NAME = "Full System";
 
 // Badge text/colors per capture mode (see fast_server/capture.py)
 const CAPTURE_MODE_BADGES = {
-    idle: { label: "Idle — not listening", className: "border-gray-300 bg-gray-100 text-gray-700", dot: "bg-gray-400" },
-    monitor: { label: "Monitoring — not saved", className: "border-cyan-300 bg-cyan-50 text-cyan-800", dot: "bg-cyan-500 animate-pulse" },
+    idle: { label: "Idle", className: "border-gray-300 bg-gray-100 text-gray-700", dot: "bg-gray-400" },
+    monitor: { label: "Monitoring", className: "border-cyan-300 bg-cyan-50 text-cyan-800", dot: "bg-cyan-500 animate-pulse" },
     record: { label: "Recording", className: "border-green-300 bg-green-50 text-green-800", dot: "bg-green-500 animate-pulse" },
-    stopping: { label: "Stopping — flushing data", className: "border-amber-300 bg-amber-50 text-amber-800", dot: "bg-amber-500 animate-pulse" },
+    stopping: { label: "Stopping & flushing data", className: "border-amber-300 bg-amber-50 text-amber-800", dot: "bg-amber-500 animate-pulse" },
 };
 
 // Wall-clock time to the millisecond, e.g. 14:54:21.412

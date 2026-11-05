@@ -44,6 +44,8 @@ A card with a graphic per device, colored the same way as the Devices box: grey 
 
 The badge in each tile's top-right corner is the device's **database ID**: its `device.id`, which is the `device_id` column in `imu_measurement`, `image_detection` and `robot`. Use it to filter a device's rows directly (`WHERE device_id = 280`) without joining `device`. A device shows `ID —` until a session has stored its data once, because that's when its `device` row is created.
 
+Under the device name, each tile shows the **robot joint** an IMU is mounted on and the **last octet of the IP** of the Pi it runs on, for example `J1 · 106` for `192.168.1.106`. Cameras show only their octet. The joint comes from the service's `smr.joint` label in `deploy/swarm-edge-nodes.yml`. The IP is the address the Pi joined the Swarm with, looked up from the node the service is pinned to, so it stays current when a Pi's address changes. Hover over the tile to see the Pi's hostname and full IP. If Docker can't be reached, or the service isn't pinned to exactly one known node, the IP is left out.
+
 ## Run Parameters (right)
 
 Per-run settings such as the IMU sample rate. You edit, then click Apply. The panel is locked while a session is recording. See [Run parameters](/operations/run-parameters).
@@ -52,7 +54,7 @@ Per-run settings such as the IMU sample rate. You edit, then click Apply. The pa
 
 Four live feeds over WebSockets (`/ws/camera`, `/ws/imu`, `/ws/robot`, `/ws/misc`):
 
-- **Camera / IMU / Robot**: insert summaries and errors, plus one cyan `[live]` line per device per second while monitoring or recording.
+- **Camera / IMU / Robot**: insert summaries and errors, plus one cyan `[live]` line per device per second while monitoring (not while recording, so insert summaries and errors stay readable).
 - **Misc**: session and system events, such as session started or stopped, deploy failures, health changes, PLC stops and parameter changes.
 
 Any service can post to these with `POST /send/{channel}`; that's how the robot's `tcp` container reports.

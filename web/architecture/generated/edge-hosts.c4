@@ -50,12 +50,12 @@ deployment {
       }
     }
 
-    host rpi-imu-bench 'RPI-IMU-BENCH' {
+    host rpiimuj6 'RPIIMUJ6' {
       technology 'edge_imu-111, device imu/111'
-      description 'Placement: node.hostname == RPI-IMU-BENCH'
+      description 'Placement: node.hostname == RPIIMUJ6'
       imu-111 = instanceOf edge.imuNode {
         title 'imu-111 (imu/111)'
-        description 'Bench IMU node (RPI-IMU-BENCH). imu_edge reads the Pi\'s IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC\'s Data_Start.'
+        description 'IMU node. imu_edge reads the Pi\'s IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC\'s Data_Start.'
       }
     }
 

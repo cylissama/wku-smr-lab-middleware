@@ -14,6 +14,8 @@
 # Every service carries smr.category / smr.device deploy labels naming the
 # device it runs, matching its MQTT topic (<category>/<device>). stack-controller
 # reads them for the dashboard's device picker (GET /stacks/edge/services).
+# IMU services also carry smr.joint, the robot joint the Pi is mounted on
+# (shown on the dashboard's Field Devices tiles, with the node's IP from Swarm).
 #
 # Swarm shows a task as "starting" until its first healthcheck passes, and the
 # dashboard's "edge ready" time is when that happened, so checks run every 1s
@@ -36,6 +38,7 @@ services:
         smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_106_DEVICE_ID}"
+        smr.joint: "J1"
       restart_policy:
         condition: on-failure
       placement:
@@ -89,6 +92,7 @@ services:
         smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_107_DEVICE_ID}"
+        smr.joint: "J2"
       restart_policy:
         condition: on-failure
       placement:
@@ -142,6 +146,7 @@ services:
         smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_108_DEVICE_ID}"
+        smr.joint: "J3"
       restart_policy:
         condition: on-failure
       placement:
@@ -195,6 +200,7 @@ services:
         smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_109_DEVICE_ID}"
+        smr.joint: "J4"
       restart_policy:
         condition: on-failure
       placement:
@@ -248,6 +254,7 @@ services:
         smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_110_DEVICE_ID}"
+        smr.joint: "J5"
       restart_policy:
         condition: on-failure
       placement:
@@ -298,9 +305,10 @@ services:
     deploy:
       replicas: 1
       labels:
-        smr.description: "Bench IMU node (RPI-IMU-BENCH). imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
+        smr.description: "IMU node. imu_edge reads the Pi's IMU through imu_host and publishes each sample to imu/<device id>; when recording it waits for the PLC's Data_Start."
         smr.category: imu
         smr.device: "${IMU_111_DEVICE_ID}"
+        smr.joint: "J6"
       restart_policy:
         condition: on-failure
       placement:

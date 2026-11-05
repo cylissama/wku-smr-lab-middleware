@@ -10,7 +10,7 @@ Two ideas decide what happens to every message a device sends: the **capture mod
 | --- | --- | --- | --- | --- |
 | **Idle** | Idle — not listening | stack removed | dropped as it arrives | nothing written |
 | **Monitor** | Monitoring — not saved | selected devices running | live samples on the dashboard | nothing written |
-| **Record** | Recording | selected devices running | live samples, and queued for storage | batched inserts into the open session |
+| **Record** | Recording | selected devices running | queued for storage (no `[live]` lines; tiles still show rate) | batched inserts into the open session |
 | **Stopping** | Stopping — flushing data | being removed | new data dropped | the last batches are written |
 
 ![Capture-mode state machine](capture-state-machine.png)

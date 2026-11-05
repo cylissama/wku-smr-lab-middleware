@@ -16,7 +16,7 @@ The system spans an always-on AMS host, a Synology NAS, Raspberry Pi edge nodes,
 
 | Kind | Nodes | Page |
 | --- | --- | --- |
-| IMU | RPIIMUJ1–RPIIMUJ5 (192.168.1.106–110), RPI-IMU-BENCH | [IMU nodes](/hardware/imu) |
+| IMU | RPIIMUJ1–RPIIMUJ6 (192.168.1.106–111) | [IMU nodes](/hardware/imu) |
 | Camera | RPiCamFront, CameraPi2, RPICAM3 | [Camera nodes](/hardware/camera) |
 
 Every edge node is a Docker Swarm worker. The dashboard deploys its container when you start monitoring or a session; see [Swarm](/docker/swarm).

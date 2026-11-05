@@ -6,7 +6,9 @@ export async function getCapture() {
 }
 
 // Selectable devices with their state: [{ key: "imu/106", category, device_label,
-// service, stack, state, db_id }] (db_id: device.id in the database, or null)
+// service, stack, state, db_id, joint, node, ip }] (db_id: device.id in the
+// database; joint: e.g. "J1" for IMUs; node/ip: the Swarm node it's pinned to
+// and its address; each null when unknown)
 export async function getDevices() {
     return apiGet("/devices");
 }

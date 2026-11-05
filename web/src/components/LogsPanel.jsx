@@ -169,7 +169,6 @@ export default function LogsPanel({ focusSource, onFocusHandled }) {
             <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-gray-200 pb-3">
                 <div className="mr-auto">
                     <h3 className="text-base font-semibold text-gray-900">Logs</h3>
-                    <p className="text-xs text-gray-500">Docker logs of every AMS container and dashboard errors</p>
                 </div>
 
                 <div className="flex overflow-hidden rounded-md border border-gray-200 text-xs">

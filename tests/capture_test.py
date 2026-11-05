@@ -213,13 +213,14 @@ class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(live[1][0], m.camera_manager)
         self.assertIn("[live] camera/front", live[1][1])
 
-    async def test_record_also_sends_live_samples(self):
+    async def test_record_sends_no_live_samples_but_tracks_activity(self):
         m.capture.set(CaptureMode.RECORD, session_id=42)
 
         await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
 
         self.assertEqual(len(drain(m.imu_queue)), 1)
-        self.assertTrue(any(c.args[2] == "live" for c in self.mock_broadcast.call_args_list))
+        self.assertFalse(any(c.args[2] == "live" for c in self.mock_broadcast.call_args_list))
+        self.assertTrue(m.live_sampler.activity("imu/106", 3)["receiving"])
 
     async def test_idle_sends_no_live_samples(self):
         await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
@@ -524,7 +525,8 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
 
 
 EDGE_SERVICES = {"success": True, "services": [
-    {"service": "imu-106", "category": "imu", "device_label": "106"},
+    {"service": "imu-106", "category": "imu", "device_label": "106", "joint": "J1",
+     "node": "RPIIMUJ1", "ip": "192.168.1.106"},
     {"service": "imu-107", "category": "imu", "device_label": "107"},
     {"service": "camera-front", "category": "camera", "device_label": "113"},
     {"service": "unlabelled", "category": None, "device_label": None},
@@ -635,6 +637,15 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
 
         robot = next(d for d in result["data"] if d["key"] == "robot/main")
         self.assertFalse(robot["receiving"])
+
+    async def test_get_devices_reports_joint_and_ip(self):
+        result = await m.get_devices()
+
+        where = {d["key"]: (d["joint"], d["node"], d["ip"]) for d in result["data"]}
+        self.assertEqual(where["imu/106"], ("J1", "RPIIMUJ1", "192.168.1.106"))
+        # stack-controller didn't say (older version), and the robot has none
+        self.assertEqual(where["imu/107"], (None, None, None))
+        self.assertEqual(where["robot/main"], (None, None, None))
 
     async def test_get_devices_reports_db_ids(self):
         result = await m.get_devices()

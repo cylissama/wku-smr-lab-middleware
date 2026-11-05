@@ -91,6 +91,16 @@ class TcpCaptureTests(unittest.IsolatedAsyncioTestCase):
         await self.feed(ROBOT_LINE)
         self.mock_nowait.assert_not_called()
 
+    async def test_record_queues_but_sends_no_live_sample(self):
+        t.capture.set(CaptureMode.RECORD, session_id=8)
+
+        await self.feed(ROBOT_LINE)
+
+        self.assertFalse(t.robot_queue.empty())
+        self.mock_nowait.assert_not_called()
+        activity = json.loads((await t.queue_status(None)).text)["activity"]
+        self.assertTrue(activity["receiving"])
+
     async def test_queue_status_counts_robot_connections(self):
         reader = asyncio.StreamReader()
         writer = MagicMock()
