@@ -26,9 +26,9 @@ The code on each IMU Raspberry Pi, a revision of the original IMU node by Masion
 
 The `plc_update` branch has the PLC tag logic (`imu_edge/plc_signals.py`). See [IMU nodes](/hardware/imu).
 
-### [Camera Edge Node](https://github.com/UmarKhattab09/camera_sensor_fusion)
+### [Camera Edge Node](https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node)
 
-Camera sensor-fusion code: ArUco marker pose detection, published over MQTT. See [Camera nodes](/hardware/camera).
+Camera sensor-fusion code (`camera-swarm-fusion/`), originally [camera_sensor_fusion](https://github.com/UmarKhattab09/camera_sensor_fusion): `camera_host` (Pi-local capture service) and `camera_edge` (the Swarm container). The `plc_update` branch has the PLC trigger. With `CAMERA_PROCESSING=remote` the marker detection runs in this repo's [camera processor](/docker/camera-processor) instead of on the Pi; that needs the patch in `plans/camera-offload/` applied to the camera repo. See [Camera nodes](/hardware/camera).
 
 ::: info Placeholder
 TODO: which branch the camera Pis run, and how the `camera-edge:latest` image is built on them.

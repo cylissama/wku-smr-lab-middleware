@@ -363,12 +363,19 @@ services:
       CAMERA_PLC_POLL_S: ${CAMERA_PLC_POLL_S:-0.05}
       CAMERA_PLC_MAX_RUN_S: ${CAMERA_PLC_MAX_RUN_S:-600}
       CAMERA_PLC_FAKE: ${CAMERA_PLC_FAKE:-false}
+      # remote: forward each JPEG to camera-processor on the AMS
+      # (camera_frames/<device>/frame), which does the detection; local: detect
+      # on the Pi as before. Needs a camera-edge image with frame_forwarder.py;
+      # an older image ignores these and keeps processing locally.
+      CAMERA_PROCESSING: ${CAMERA_PROCESSING:-remote}
+      CAMERA_FRAME_BROKER_IP: "${CAMERA_FRAME_BROKER_IP:-}"
+      CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
 
 
     deploy:
       replicas: 1
       labels:
-        smr.description: "Front camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_front. When recording it waits for the PLC's Data_Start."
+        smr.description: "Front camera. camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_front. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
         # camera/113_front), and that's also its device label in the DB
@@ -416,10 +423,17 @@ services:
       CAMERA_PLC_POLL_S: ${CAMERA_PLC_POLL_S:-0.05}
       CAMERA_PLC_MAX_RUN_S: ${CAMERA_PLC_MAX_RUN_S:-600}
       CAMERA_PLC_FAKE: ${CAMERA_PLC_FAKE:-false}
+      # remote: forward each JPEG to camera-processor on the AMS
+      # (camera_frames/<device>/frame), which does the detection; local: detect
+      # on the Pi as before. Needs a camera-edge image with frame_forwarder.py;
+      # an older image ignores these and keeps processing locally.
+      CAMERA_PROCESSING: ${CAMERA_PROCESSING:-remote}
+      CAMERA_FRAME_BROKER_IP: "${CAMERA_FRAME_BROKER_IP:-}"
+      CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
     deploy:
       replicas: 1
       labels:
-        smr.description: "Side camera. camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_side. When recording it waits for the PLC's Data_Start."
+        smr.description: "Side camera. camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_side. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
         # camera/113_front), and that's also its device label in the DB
@@ -467,10 +481,17 @@ services:
       CAMERA_PLC_POLL_S: ${CAMERA_PLC_POLL_S:-0.05}
       CAMERA_PLC_MAX_RUN_S: ${CAMERA_PLC_MAX_RUN_S:-600}
       CAMERA_PLC_FAKE: ${CAMERA_PLC_FAKE:-false}
+      # remote: forward each JPEG to camera-processor on the AMS
+      # (camera_frames/<device>/frame), which does the detection; local: detect
+      # on the Pi as before. Needs a camera-edge image with frame_forwarder.py;
+      # an older image ignores these and keeps processing locally.
+      CAMERA_PROCESSING: ${CAMERA_PROCESSING:-remote}
+      CAMERA_FRAME_BROKER_IP: "${CAMERA_FRAME_BROKER_IP:-}"
+      CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
     deploy:
       replicas: 1
       labels:
-        smr.description: "Third camera (RPICAM3). camera_edge detects ArUco markers and publishes each frame's marker poses to camera/<device id>_cam3. When recording it waits for the PLC's Data_Start."
+        smr.description: "Third camera (RPICAM3). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam3. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
         # camera/113_front), and that's also its device label in the DB

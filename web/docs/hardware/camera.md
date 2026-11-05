@@ -1,6 +1,16 @@
 # Camera nodes
 
-Raspberry Pis with cameras run the camera sensor-fusion pipeline: ArUco marker pose detection (code: [camera_sensor_fusion](https://github.com/UmarKhattab09/camera_sensor_fusion)). They publish each frame's marker poses over MQTT to `camera/<device_id>_<name>`, for example `camera/113_front`. A message is sent only for frames where a marker is detected, so **no marker in view means no messages**, and the Devices box then shows *running · no data*.
+Raspberry Pis with cameras take the photos for the camera sensor-fusion pipeline: ArUco marker pose detection (code: [wku-smr-lab-camera-edge-node](https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/plc_update), branch `plc_update`, `camera-swarm-fusion/`). Each frame's marker poses are published over MQTT to `camera/<device_id>_<name>`, for example `camera/113_front`. A message is sent only for frames where a marker is detected, so **no marker in view means no messages**, and the Devices box then shows *running · no data*.
+
+## Where each step runs
+
+| Step | Where | Code (camera edge repo) |
+| --- | --- | --- |
+| Open `/dev/video0` (OpenCV V4L2, MJPG), grab frames at `CAMERA_FPS`, JPEG-encode | Pi: `camera_host`, systemd unit `camera-hw`, not Docker | `camera_host/`, `camera_fusion/frame_source.py` |
+| Wait for the PLC, number each run's frames | Pi: `camera_edge` (Swarm service) | `camera_edge/agent.py`, `plc_signals.py` |
+| Decode, ArUco detection, PnP pose, save frames, publish rows | **`CAMERA_PROCESSING=remote`** (default): [camera-processor](/docker/camera-processor) on the AMS. `local`: `camera_edge` on the Pi | `camera_processor/` here; `camera_edge/agent.py` `_process_frame` on the Pi |
+
+`camera_host` serves the frames on a Unix-socket API at `/run/camera-hw/camera.sock`, which is why the containers mount `/run/camera-hw`. In remote mode `camera_edge` forwards the JPEG bytes unchanged on `camera_frames/<device_id>_<name>/frame`; see [Camera processor](/docker/camera-processor).
 
 ## Nodes
 
@@ -10,7 +20,7 @@ Raspberry Pis with cameras run the camera sensor-fusion pipeline: ArUco marker p
 | `camera-side` | `camera/114_side` | CameraPi2 | `node.labels.camera == side` |
 | `camera-cam3` | `camera/115_cam3` | RPICAM3 (192.168.1.94) | `node.labels.camera == cam3` |
 
-Device ids, names and calibration files come from `deploy/.env` (`CAMERA_FRONT_DEVICE_ID`, `CAMERA_FRONT_NAME`, `CAMERA_FRONT_CALIBRATION_PATH`, …). The containers (image `camera-edge:latest`) mount `/run/camera-hw` and `/opt/camera-sensor-fusion/data` from the Pi.
+Device ids, names and calibration files come from `deploy/.env` (`CAMERA_FRONT_DEVICE_ID`, `CAMERA_FRONT_NAME`, `CAMERA_FRONT_CALIBRATION_PATH`, …). The calibration is read on the Pi and sent to camera-processor in the camera's config message. The containers (image `camera-edge:latest`) mount `/run/camera-hw` and `/opt/camera-sensor-fusion/data` from the Pi; with remote processing nothing is written to the data folder (run folders are on the AMS).
 
 With `CAMERA_PLC_TRIGGER=true`, a camera waits for the [PLC](/hardware/plc)'s `Data_Start` pulse before sending and stops on `Db_Stop` (or after `CAMERA_PLC_MAX_RUN_S`). `fastapi-app` sets this on every deploy, the same as the IMUs': off while monitoring, on for a session unless the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD` says otherwise. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
@@ -19,7 +29,7 @@ With `CAMERA_PLC_TRIGGER=true`, a camera waits for the [PLC](/hardware/plc)'s `D
 :::
 
 ::: info Placeholder
-TODO: the camera Pi's host-side setup (what provides `/run/camera-hw`, how `camera-edge:latest` is built), and what the image-analysis machine does with the stream. To view a camera's live video, see [Camera live feed](/operations/camera-ops).
+TODO: how `camera-edge:latest` is built on each Pi (and where the `camera-hw` unit's checkout lives, `/home/admin/camera_swarm_stuff/camera-swarm-fusion` in the repo's unit file), and what the image-analysis machine does with the stream. To view a camera's live video, see [Camera live feed](/operations/camera-ops).
 :::
 
 ## Marker pose data format

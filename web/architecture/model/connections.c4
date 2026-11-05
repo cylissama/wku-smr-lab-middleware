@@ -12,7 +12,8 @@ model {
 
   // Edge -> AMS
   edge.imuNode.imuEdge -[mqtt]-> ams.mqtt-broker 'publishes imu/<id> (port 1883)'
-  edge.cameraNode.cameraEdge -[mqtt]-> ams.mqtt-broker 'publishes camera/<id>_<name> (port 1883)'
+  edge.cameraNode.cameraEdge -[mqtt]-> ams.mqtt-broker 'publishes JPEG frames on camera_frames/<id>_<name>/frame (port 1883)'
+  edge.cameraNode.cameraEdge -[cip]-> robotcell.plc 'reads Data_Start, Db_Stop (port 44818)'
   ams.docker -[docker]-> edge.imuNode.imuEdge 'schedules (Swarm)'
   ams.docker -[docker]-> edge.cameraNode.cameraEdge 'schedules (Swarm)'
 

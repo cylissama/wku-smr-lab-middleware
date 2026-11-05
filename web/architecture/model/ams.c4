@@ -72,6 +72,14 @@ model {
     link /docs/docker/tcp-server 'TCP server'
   }
 
+  extend ams.camera-processor {
+    link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/camera_processor/service.py 'camera_processor/service.py'
+    link /docs/docker/camera-processor 'Camera processor'
+  }
+
+  ams.mqtt-broker -[mqtt]-> ams.camera-processor 'camera_frames/+/+ (JPEG frames, camera config)'
+  ams.camera-processor -[mqtt]-> ams.mqtt-broker 'publishes marker rows on camera/<id>_<name>'
+
   extend ams.stack-controller {
     link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/stack_controller/main.py 'stack_controller/main.py'
     link /docs/docker/stack-controller 'Stack controller & device selection'

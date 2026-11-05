@@ -63,6 +63,18 @@ model {
       link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/docker-compose.yml 'docker-compose.yml'
     }
 
+    camera-processor = service 'camera-processor' {
+      technology 'built from camera_processor/Dockerfile'
+      description 'Camera image processing (Python, OpenCV), moved off the camera Pis. Takes each Pi\'s JPEG frames from camera_frames/<device>/frame, detects ArUco markers, estimates their pose and publishes the rows to camera/<device>. Keeps each run\'s frames and detections.csv.'
+      metadata {
+        compose_service 'camera-processor'
+        container_name 'AMS-camera-processor'
+        monitor 'true'
+        autoheal 'true'
+      }
+      link https://github.com/cylissama/wku-smr-lab-middleware/blob/main/docker-compose.yml 'docker-compose.yml'
+    }
+
     ntp = service 'ntp' {
       technology 'cturra/ntp:latest, ports NTP_PORT→123/udp'
       description 'NTP server synced from the Google public pool; the lab\'s shared clock.'
