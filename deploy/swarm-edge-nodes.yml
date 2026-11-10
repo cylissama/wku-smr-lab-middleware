@@ -379,6 +379,12 @@ services:
       CAMERA_PROCESSING: ${CAMERA_PROCESSING:-remote}
       CAMERA_FRAME_BROKER_IP: "${CAMERA_FRAME_BROKER_IP:-}"
       CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
+      # Whether camera_edge keeps raw / annotated frames on the Pi's SD card
+      # (local processing only; remote mode saves nothing on the Pi). Dashboard
+      # run parameters; CAMERA_EDGE_ so they can't be mixed up with
+      # camera-processor's CAMERA_SAVE_* in the repo-root .env.
+      CAMERA_SAVE_FRAMES: ${CAMERA_EDGE_SAVE_FRAMES:-true}
+      CAMERA_SAVE_ANNOTATED: ${CAMERA_EDGE_SAVE_ANNOTATED:-true}
 
 
     deploy:
@@ -440,6 +446,12 @@ services:
       CAMERA_PROCESSING: ${CAMERA_PROCESSING:-remote}
       CAMERA_FRAME_BROKER_IP: "${CAMERA_FRAME_BROKER_IP:-}"
       CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
+      # Whether camera_edge keeps raw / annotated frames on the Pi's SD card
+      # (local processing only; remote mode saves nothing on the Pi). Dashboard
+      # run parameters; CAMERA_EDGE_ so they can't be mixed up with
+      # camera-processor's CAMERA_SAVE_* in the repo-root .env.
+      CAMERA_SAVE_FRAMES: ${CAMERA_EDGE_SAVE_FRAMES:-true}
+      CAMERA_SAVE_ANNOTATED: ${CAMERA_EDGE_SAVE_ANNOTATED:-true}
     deploy:
       replicas: 1
       labels:
@@ -499,6 +511,12 @@ services:
       CAMERA_PROCESSING: ${CAMERA_PROCESSING:-remote}
       CAMERA_FRAME_BROKER_IP: "${CAMERA_FRAME_BROKER_IP:-}"
       CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
+      # Whether camera_edge keeps raw / annotated frames on the Pi's SD card
+      # (local processing only; remote mode saves nothing on the Pi). Dashboard
+      # run parameters; CAMERA_EDGE_ so they can't be mixed up with
+      # camera-processor's CAMERA_SAVE_* in the repo-root .env.
+      CAMERA_SAVE_FRAMES: ${CAMERA_EDGE_SAVE_FRAMES:-true}
+      CAMERA_SAVE_ANNOTATED: ${CAMERA_EDGE_SAVE_ANNOTATED:-true}
     deploy:
       replicas: 1
       labels:
