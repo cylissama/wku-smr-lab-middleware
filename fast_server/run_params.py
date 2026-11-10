@@ -28,6 +28,18 @@ PARAMS: dict[str, dict[str, Any]] = {
         "help": "Start Monitoring with a stand-in PLC (a Pi): IMUs and cameras wait for its Data_Start. "
                 "Empty or 0 = stream right away. Recording always uses the real PLC.",
     },
+    # camera_edge's CAMERA_SAVE_FRAMES / CAMERA_SAVE_ANNOTATED, renamed in
+    # deploy/swarm-edge-nodes.yml so they aren't camera-processor's (AMS) flags
+    "CAMERA_EDGE_SAVE_FRAMES": {
+        "label": "Save frames on Pi", "group": "camera", "type": "bool", "edge": True,
+        "help": "Camera Pis keep every raw frame on their SD card. Only with on-Pi (local) processing; "
+                "camera-processor on the AMS keeps its own copy.",
+    },
+    "CAMERA_EDGE_SAVE_ANNOTATED": {
+        "label": "Save annotated on Pi", "group": "camera", "type": "bool", "edge": True,
+        "help": "Camera Pis keep frames with the detected markers drawn on their SD card. "
+                "Only with on-Pi (local) processing.",
+    },
 }
 
 EDGE_PARAMS = [key for key, p in PARAMS.items() if p["edge"]]
