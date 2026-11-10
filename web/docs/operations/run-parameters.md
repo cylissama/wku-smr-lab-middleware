@@ -8,6 +8,8 @@ The **Run Parameters** panel on the dashboard sets per-run values for the edge d
 | Wait for PLC start | `IMU_PLC_TRIGGER_ON_RECORD` | on/off | repo-root `.env` |
 | Max PLC run | `IMU_PLC_MAX_RUN_S` | 30–3600 s | `deploy/.env` |
 | Simulated PLC IP | `MONITOR_PLC_IP` | IPv4, or empty/`0` for none | none |
+| Save frames on Pi | `CAMERA_EDGE_SAVE_FRAMES` | on/off | `deploy/.env` |
+| Save annotated on Pi | `CAMERA_EDGE_SAVE_ANNOTATED` | on/off | `deploy/.env` |
 
 ## How it behaves
 
@@ -26,6 +28,8 @@ SELECT id, label, parameters->>'IMU_SAMPLE_HZ' AS imu_hz FROM session ORDER BY i
 *Wait for PLC start* (PLC group) sets `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` for recording sessions only, so it covers the IMUs and the cameras. Monitoring streams without waiting. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
 *Simulated PLC IP* is the other way round: it only affects monitoring, which then waits for that PLC's `Data_Start`. The real PLC (`192.168.1.103`) is refused. Sessions don't use it, so it's left out of `session.parameters` and the Start Session confirmation. See [Monitoring with a simulated PLC](/operations/plc-auto-stop#monitoring-with-a-simulated-plc).
+
+*Save frames on Pi* and *Save annotated on Pi* (Camera group) set camera_edge's `CAMERA_SAVE_FRAMES` / `CAMERA_SAVE_ANNOTATED` on every camera Pi, so the Pi's SD card doesn't keep a copy of each raw or annotated frame. They only matter while a Pi processes frames itself (`CAMERA_PROCESSING=local`, or a camera-edge image built before the remote-processing patch). With remote processing the Pi saves nothing, and [camera-processor](/docker/camera-processor) on the AMS keeps the run folders. Its own `CAMERA_SAVE_*` flags are separate, in the repo-root `.env`. Turning these off doesn't stop the Pi's `detections.csv`. Changing either one while monitoring restarts the camera services.
 
 ## Where things live
 

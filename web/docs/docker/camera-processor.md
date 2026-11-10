@@ -46,7 +46,7 @@ Each run gets a folder in the `camera_data` volume (`/data` in the container):
     annotated/f000000_aruco.jpg   frames with a marker, outlined, with pose axes
 ```
 
-Raw frames are ~0.2-0.4 MB each at 1080p, so ~3-6 MB/s per streaming camera. Turn parts off with `CAMERA_SAVE_FRAMES`, `CAMERA_SAVE_ANNOTATED`, `CAMERA_SAVE_CSV` in the root `.env`.
+Raw frames are ~0.2-0.4 MB each at 1080p, so ~3-6 MB/s per streaming camera. Turn parts off with `CAMERA_SAVE_FRAMES`, `CAMERA_SAVE_ANNOTATED`, `CAMERA_SAVE_CSV` in the root `.env`. These are the AMS copies. The Pis' own frame saving, which only happens with local processing, is the *Save frames on Pi* / *Save annotated on Pi* [run parameters](/operations/run-parameters) (`CAMERA_EDGE_SAVE_*` in `deploy/.env`).
 
 If processing falls behind, each camera's queue (`CAMERA_QUEUE_FRAMES`, default 60 = 4 s at 15 fps) drops its oldest frame and counts it, so a slow processor never backs up the broker or the Pis.
 
