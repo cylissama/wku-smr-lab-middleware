@@ -63,6 +63,7 @@ export default defineConfig({
           { text: 'Health & logs', link: '/docker/health-and-logs' },
           { text: 'Automations', link: '/docker/automations' },
           { text: 'TCP Server', link: '/docker/tcp-server' },
+          { text: 'Camera processor', link: '/docker/camera-processor' },
           { text: 'Portainer', link: '/docker/portainer' },
         ],
       },

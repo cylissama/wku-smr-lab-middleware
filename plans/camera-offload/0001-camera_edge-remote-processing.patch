@@ -1,0 +1,845 @@
+From 1e0a752e19d319ea863f8fd453a41fae927935ca Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 5 Nov 2026 18:08:13 +0000
+Subject: [PATCH] camera_edge: forward frames to camera-processor
+ (CAMERA_PROCESSING=remote)
+
+Moves the image processing off the camera Pi. With CAMERA_PROCESSING=remote,
+camera_edge keeps talking to camera_host, waiting for the PLC and numbering
+each run's frames, but no longer decodes frames or runs ArUco detection +
+PnP. Each JPEG from camera_host is published unchanged on
+camera_frames/<DEVICE_ID>_<CAMERA_NAME>/frame, with a retained .../config
+message carrying the calibration and detection settings. camera-processor
+(wku-smr-lab-middleware, camera_processor/) runs the same detection and
+publishes the same rows on camera/<DEVICE_ID>_<CAMERA_NAME>.
+
+CAMERA_PROCESSING defaults to local, so existing deployments are unchanged.
+
+- camera_edge/frame_forwarder.py: wire format + MQTT publisher (bounded
+  queue, drops and counts frames while the broker is down)
+- config: CAMERA_PROCESSING, CAMERA_FRAME_BROKER_IP/_PORT,
+  CAMERA_FRAME_TOPIC_PREFIX, CAMERA_FRAME_QOS
+- agent: remote mode skips local session folders and outputs; one run_id
+  per PLC run so camera-processor opens a run folder per run
+- tests/test_camera_edge_remote.py, scripts/remote_processing_smoke.py
+  (end-to-end; checks remote rows == local rows for the same JPEG)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BMfRtKBVPGk558yGXkuWf3
+---
+ camera-swarm-fusion/CAMERA_EDGE_REDESIGN.md   |  34 +++
+ camera-swarm-fusion/camera_edge/agent.py      |  93 ++++++--
+ camera-swarm-fusion/camera_edge/config.py     |  25 +++
+ .../camera_edge/frame_forwarder.py            | 183 +++++++++++++++
+ camera-swarm-fusion/docker-compose.yml        |   6 +
+ camera-swarm-fusion/requirements-edge.txt     |   2 +
+ .../scripts/remote_processing_smoke.py        | 212 ++++++++++++++++++
+ .../tests/test_camera_edge_remote.py          | 114 ++++++++++
+ 8 files changed, 655 insertions(+), 14 deletions(-)
+ create mode 100644 camera-swarm-fusion/camera_edge/frame_forwarder.py
+ create mode 100644 camera-swarm-fusion/scripts/remote_processing_smoke.py
+ create mode 100644 camera-swarm-fusion/tests/test_camera_edge_remote.py
+
+diff --git a/camera-swarm-fusion/CAMERA_EDGE_REDESIGN.md b/camera-swarm-fusion/CAMERA_EDGE_REDESIGN.md
+index 05f7ea9..ac57dfb 100644
+--- a/camera-swarm-fusion/CAMERA_EDGE_REDESIGN.md
++++ b/camera-swarm-fusion/CAMERA_EDGE_REDESIGN.md
+@@ -100,6 +100,40 @@ In this repo, that behavior is implemented by:
+ - host service: `camera_host/`
+ - edge container agent: `camera_edge/`
+ 
++## Remote Processing (CAMERA_PROCESSING=remote)
++
++The image processing can move off the Pi entirely:
++
++```
++CAM_PI (camera_host takes the photo, camera_edge forwards it)
++    -> camera-processor (wku-smr-lab-middleware, camera_processor/, on the AMS)
++    -> AMS (camera/<DEVICE_ID>_<CAMERA_NAME>, ingested by fastapi-app)
++```
++
++With `CAMERA_PROCESSING=remote`, `camera_edge` still talks to `camera_host`,
++waits for the PLC and numbers each run's frames, but it no longer decodes
++frames or runs detection. Each JPEG is published unchanged on
++`camera_frames/<DEVICE_ID>_<CAMERA_NAME>/frame` (`camera_edge/frame_forwarder.py`),
++with a retained `.../config` message carrying the calibration and detection
++settings. camera-processor runs the same ArUco + PnP code and publishes the
++same rows on `camera/<DEVICE_ID>_<CAMERA_NAME>`, so the middleware's ingestion
++is unchanged. Run folders (frames, annotated frames, detections.csv) are kept
++by camera-processor instead of under `/app/data/sessions` on the Pi.
++
++| Variable | Default | |
++| --- | --- | --- |
++| `CAMERA_PROCESSING` | `local` | `local` or `remote` |
++| `CAMERA_FRAME_BROKER_IP` / `_PORT` | `MQTT_BROKER_IP` / `_PORT` | broker the frames go to |
++| `CAMERA_FRAME_TOPIC_PREFIX` | `camera_frames` | must match camera-processor; never `camera` |
++| `CAMERA_FRAME_QOS` | `0` | frames are dropped (and counted) while the broker is down |
++
++End-to-end check against a running camera-processor (it also confirms the
++remote rows equal what local processing computes from the same JPEG):
++
++```bash
++python scripts/remote_processing_smoke.py <broker-ip> 1883
++```
++
+ ## Local API Contract
+ 
+ The Pi-local service exposes these endpoints:
+diff --git a/camera-swarm-fusion/camera_edge/agent.py b/camera-swarm-fusion/camera_edge/agent.py
+index d46ac72..15e2748 100644
+--- a/camera-swarm-fusion/camera_edge/agent.py
++++ b/camera-swarm-fusion/camera_edge/agent.py
+@@ -9,7 +9,7 @@ import cv2
+ import numpy as np
+ 
+ from camera_fusion.detect import build_detector, detect_markers
+-from camera_fusion.output import CsvOutput, MqttOutput
++from camera_fusion.output import CsvOutput, MqttOutput, NullOutput
+ from iiot_pipeline.services.calib import load_calib
+ from iiot_pipeline.services.storage import SessionStorage
+ from iiot_pipeline.strategies.localize_pnp import PnPLocalize
+@@ -21,6 +21,7 @@ logging.basicConfig(
+     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+ )
+ logger = logging.getLogger("camera_edge")
++from .frame_forwarder import FrameForwarder, build_config_message
+ from .health import EdgeHealthTracker
+ from .plc_signals import PLCSignalWatcher, build_plc_factory
+ from .service_client import LocalCameraServiceClient, ServiceError
+@@ -36,6 +37,11 @@ class EdgeAgent:
+     publishes through the existing CsvOutput/MqttOutput sinks so the
+     detections.csv schema and MQTT payload/topic stay exactly what the
+     middleware already expects.
++
++    With CAMERA_PROCESSING=remote it does none of the image processing: each
++    JPEG from camera_host is forwarded unchanged to camera-processor on the
++    AMS (frame_forwarder.py), which detects and publishes the same rows. The
++    PLC gating, run boundaries and frame numbering below stay on the Pi.
+     """
+ 
+     def __init__(self, config: EdgeAgentConfig, plc_factory=None):
+@@ -45,7 +51,10 @@ class EdgeAgent:
+         self.health = EdgeHealthTracker(config.health_path)
+         self._stop_requested = False
+ 
+-        K, dist, _ = load_calib(config.calibration_path)
++        K, dist, image_size = load_calib(config.calibration_path)
++        self._calib = (K, dist, image_size)
++        self._forwarder: FrameForwarder | None = None
++        self._run_id = config.session_id
+         self._localize = PnPLocalize(K, dist, config.marker_length_m)
+         self._detector_state = build_detector(config.aruco_dict)
+         self._target_ids = set(config.target_ids) if config.target_ids else None
+@@ -66,14 +75,34 @@ class EdgeAgent:
+             self.config.calibration_path,
+         )
+ 
+-        csv_output = CsvOutput()
+-        mqtt_output = MqttOutput(
+-            broker_ip=self.config.mqtt_broker_ip,
+-            broker_port=self.config.mqtt_broker_port,
+-            device_id=self.config.device_id,
+-            client_type=self.config.client_type,
+-            camera_name=self.config.camera_name,
+-        )
++        if self.config.remote_processing:
++            self._forwarder = FrameForwarder(
++                broker_ip=self.config.frame_broker_ip,
++                broker_port=self.config.frame_broker_port,
++                topic_prefix=self.config.frame_topic_prefix,
++                config_message=build_config_message(self.config, *self._calib),
++                qos=self.config.frame_qos,
++            )
++            self._forwarder.open()
++            # Rows are published by camera-processor, not from here.
++            csv_output, mqtt_output = NullOutput(), NullOutput()
++        else:
++            csv_output = CsvOutput()
++            mqtt_output = MqttOutput(
++                broker_ip=self.config.mqtt_broker_ip,
++                broker_port=self.config.mqtt_broker_port,
++                device_id=self.config.device_id,
++                client_type=self.config.client_type,
++                camera_name=self.config.camera_name,
++            )
++
++        try:
++            self._run_with_outputs(csv_output, mqtt_output)
++        finally:
++            if self._forwarder is not None:
++                self._forwarder.close()
++
++    def _run_with_outputs(self, csv_output, mqtt_output) -> None:
+ 
+         if self.config.plc_trigger:
+             # One MQTT connection for the container's lifetime, like imu_edge's
+@@ -90,7 +119,11 @@ class EdgeAgent:
+                         pass
+             return
+ 
+-        session_dir = self._open_session_storage()
++        if self._forwarder is not None:
++            session_dir = Path(self.config.session_root)  # unused by the null outputs
++            self._run_id = self.config.session_id
++        else:
++            session_dir = self._open_session_storage()
+ 
+         csv_output.open(session_dir)
+         mqtt_output.open(session_dir)
+@@ -230,9 +263,15 @@ class EdgeAgent:
+         dropped = 0
+         end_reason = "camera_host stopped sending frames"
+ 
+-        csv_output = CsvOutput()
+-        session_dir = self._open_session_storage()
+-        csv_output.open(session_dir)
++        if self._forwarder is not None:
++            # camera-processor opens a run folder per run_id.
++            csv_output = NullOutput()
++            self._run_id = f"{self.config.session_id}-{start_ms}"
++            session_dir = f"run {self._run_id} (frames forwarded to camera-processor)"
++        else:
++            csv_output = CsvOutput()
++            session_dir = self._open_session_storage()
++            csv_output.open(session_dir)
+         logger.info(
+             "PLC: %s ON -> detecting and sending   [%s]",
+             self.config.plc_tag_start, watcher.snapshot(),
+@@ -347,7 +386,33 @@ class EdgeAgent:
+                 self._process_frame(sample, csv_output, mqtt_output)
+             time.sleep(self.config.poll_interval_s)
+ 
++    def _forward_frame(self, sample: dict) -> None:
++        forwarder = self._forwarder
++        sent = forwarder.send(sample, self._run_id)
++        self.health.update(
++            state="streaming",
++            session_id=self.config.session_id,
++            processing="remote",
++            run_id=self._run_id,
++            frame_broker_connected=forwarder.connected,
++            forwarded=forwarder.sent,
++            dropped=forwarder.dropped,
++            error_message=forwarder.last_error,
++            last_capture_time_ms=sample["capture_time_ms"],
++            last_frame_idx=sample["frame_idx"],
++        )
++        # Every 50th frame, and every 50th drop (not 15 lines a second while the broker is down)
++        if sample["frame_idx"] % 50 == 0 or (not sent and forwarder.dropped % 50 == 1):
++            logger.info(
++                "frame=%s %s (forwarded %d, dropped %d)",
++                sample["frame_idx"], "forwarded" if sent else "DROPPED: frame broker not connected",
++                forwarder.sent, forwarder.dropped,
++            )
++
+     def _process_frame(self, sample: dict, csv_output: CsvOutput, mqtt_output: MqttOutput) -> None:
++        if self._forwarder is not None:
++            return self._forward_frame(sample)
++
+         image = cv2.imdecode(np.frombuffer(sample["jpeg"], dtype=np.uint8), cv2.IMREAD_COLOR)
+         if image is None:
+             return
+diff --git a/camera-swarm-fusion/camera_edge/config.py b/camera-swarm-fusion/camera_edge/config.py
+index b1a01c2..66ecffd 100644
+--- a/camera-swarm-fusion/camera_edge/config.py
++++ b/camera-swarm-fusion/camera_edge/config.py
+@@ -33,6 +33,13 @@ def _parse_marker_lengths(raw: str | None) -> dict[int, float] | None:
+     return lengths or None
+ 
+ 
++def _parse_processing(raw: str | None) -> str:
++    value = (raw or "local").strip().lower()
++    if value not in {"local", "remote"}:
++        raise ValueError(f"CAMERA_PROCESSING must be 'local' or 'remote', not {raw!r}")
++    return value
++
++
+ @dataclass
+ class EdgeAgentConfig:
+     socket_path: str
+@@ -70,6 +77,18 @@ class EdgeAgentConfig:
+     plc_fake: bool = False
+     plc_fake_speed: float = 1.0
+     plc_max_run_s: float = 600.0
++    # Where the image processing runs. "local": detect + pose here, as before.
++    # "remote": forward each JPEG to camera-processor (middleware repo) over
++    # MQTT and let it detect; see frame_forwarder.py.
++    processing: str = "local"
++    frame_broker_ip: str = ""
++    frame_broker_port: int = 1883
++    frame_topic_prefix: str = "camera_frames"
++    frame_qos: int = 0
++
++    @property
++    def remote_processing(self) -> bool:
++        return self.processing == "remote"
+ 
+     @classmethod
+     def from_env(cls) -> "EdgeAgentConfig":
+@@ -111,4 +130,10 @@ class EdgeAgentConfig:
+             plc_fake=_env_flag("CAMERA_PLC_FAKE", False),
+             plc_fake_speed=float(os.getenv("CAMERA_PLC_FAKE_SPEED", "1.0")),
+             plc_max_run_s=float(os.getenv("CAMERA_PLC_MAX_RUN_S", "600")),
++            processing=_parse_processing(os.getenv("CAMERA_PROCESSING", "local")),
++            # Blank = the broker the rows used to go to (MQTT_BROKER_IP).
++            frame_broker_ip=os.getenv("CAMERA_FRAME_BROKER_IP") or os.getenv("MQTT_BROKER_IP", "127.0.0.1"),
++            frame_broker_port=int(os.getenv("CAMERA_FRAME_BROKER_PORT") or os.getenv("MQTT_BROKER_PORT", "1883")),
++            frame_topic_prefix=os.getenv("CAMERA_FRAME_TOPIC_PREFIX", "camera_frames"),
++            frame_qos=min(1, max(0, int(os.getenv("CAMERA_FRAME_QOS", "0")))),
+         )
+diff --git a/camera-swarm-fusion/camera_edge/frame_forwarder.py b/camera-swarm-fusion/camera_edge/frame_forwarder.py
+new file mode 100644
+index 0000000..fb33274
+--- /dev/null
++++ b/camera-swarm-fusion/camera_edge/frame_forwarder.py
+@@ -0,0 +1,183 @@
++"""Forward camera frames to the off-Pi camera-processor (CAMERA_PROCESSING=remote).
++
++With remote processing the Pi only captures: camera_host grabs and JPEG-encodes
++each frame, and camera_edge forwards those JPEG bytes unchanged (no decode, no
++detection) to camera-processor, which runs on the AMS (wku-smr-lab-middleware,
++camera_processor/). camera-processor does the ArUco detection + PnP pose this
++container used to do and publishes the same rows to camera/<device>.
++
++    CAM_PI (camera_host + camera_edge)  --camera_frames/<device>/frame-->
++    camera-processor                    --camera/<device>-->  AMS (fastapi-app)
++
++Wire format -- keep in step with camera_processor/protocol.py in the
++middleware repo and bump VERSION on both sides together:
++
++    camera_frames/<device>/config   retained JSON, re-sent on every (re)connect:
++                                    calibration (camera_matrix, dist_coeffs) and
++                                    the detection settings from this container's env
++    camera_frames/<device>/frame    4-byte big-endian header length, JSON header
++                                    {v, device_id, camera_name, run_id, frame_idx,
++                                    capture_time_ms, sent_at_ms}, then the JPEG
++
++<device> is <DEVICE_ID>_<CAMERA_NAME>, e.g. 113_front.
++"""
++from __future__ import annotations
++
++import json
++import logging
++import struct
++import threading
++import time
++
++import numpy as np
++
++VERSION = 1
++
++logger = logging.getLogger("camera_edge.forwarder")
++
++_LEN = struct.Struct(">I")
++
++
++def device_label(device_id, camera_name) -> str:
++    return f"{device_id}_{camera_name}"
++
++
++def encode_frame(header: dict, jpeg: bytes) -> bytes:
++    raw = json.dumps({"v": VERSION, **header}, separators=(",", ":")).encode("utf-8")
++    return _LEN.pack(len(raw)) + raw + bytes(jpeg)
++
++
++def _matrix(value) -> list:
++    return np.asarray(value, dtype=float).tolist()
++
++
++def build_config_message(config, K, dist, image_size) -> dict:
++    """Everything camera-processor needs to process this camera's frames."""
++    lengths = config.marker_lengths_m or {}
++    return {
++        "v": VERSION,
++        "device_id": str(config.device_id),
++        "camera_name": str(config.camera_name),
++        "client_type": str(config.client_type),
++        "aruco_dict": config.aruco_dict,
++        "marker_length_m": float(config.marker_length_m),
++        "marker_lengths_m": {str(k): float(v) for k, v in lengths.items()} or None,
++        "target_ids": list(config.target_ids) if config.target_ids else None,
++        "camera_matrix": _matrix(K),
++        "dist_coeffs": np.asarray(dist, dtype=float).reshape(-1).tolist(),
++        "image_size": list(image_size) if image_size else None,
++        "calibration_path": config.calibration_path,
++        "fps": config.fps,
++        "width": config.width,
++        "height": config.height,
++        "plc_trigger": config.plc_trigger,
++    }
++
++
++def _make_client(client_id: str):
++    import paho.mqtt.client as mqtt
++
++    if hasattr(mqtt, "CallbackAPIVersion"):  # paho-mqtt >= 2
++        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
++    return mqtt.Client(client_id=client_id)
++
++
++class FrameForwarder:
++    """Publishes this camera's frames (and its retained config) over MQTT.
++
++    Never blocks the capture loop: frames are QoS 0 and published only while
++    connected; while the broker is unreachable they are dropped and counted
++    (paho reconnects in the background).
++    """
++
++    def __init__(self, broker_ip: str, broker_port: int, topic_prefix: str,
++                 config_message: dict, qos: int = 0, client_factory=None):
++        self.broker_ip = broker_ip
++        self.broker_port = broker_port
++        self.prefix = topic_prefix.strip().strip("/")
++        if not self.prefix or self.prefix.lower() == "camera":
++            raise ValueError("CAMERA_FRAME_TOPIC_PREFIX must not be empty or 'camera'")
++        self.config_message = config_message
++        self.label = device_label(config_message["device_id"], config_message["camera_name"])
++        self.frame_topic = f"{self.prefix}/{self.label}/frame"
++        self.config_topic = f"{self.prefix}/{self.label}/config"
++        self.qos = qos
++        self._client_factory = client_factory or _make_client
++        self._client = None
++        self._connected = threading.Event()
++        self._closing = False
++        self.sent = 0
++        self.dropped = 0
++        self.last_error: str | None = None
++
++    @property
++    def connected(self) -> bool:
++        return self._connected.is_set()
++
++    def open(self) -> None:
++        client = self._client_factory(f"camera-edge-{self.label}")
++        client.on_connect = self._on_connect
++        client.on_disconnect = self._on_disconnect
++        client.reconnect_delay_set(min_delay=1, max_delay=10)
++        # Bounded so a slow link can't buffer frames in RAM on the Pi.
++        client.max_queued_messages_set(32)
++        client.connect_async(self.broker_ip, self.broker_port, keepalive=30)
++        client.loop_start()
++        self._client = client
++        logger.info("forwarding frames to %s:%s on %s (processing on camera-processor)",
++                    self.broker_ip, self.broker_port, self.frame_topic)
++
++    def _on_connect(self, client, _userdata, _flags, rc, _properties=None):
++        ok = (not rc.is_failure) if hasattr(rc, "is_failure") else rc == 0
++        if not ok:
++            self.last_error = f"broker refused connection: {rc}"
++            logger.warning("frame broker %s:%s refused the connection: %s", self.broker_ip, self.broker_port, rc)
++            return
++        # Retained, so camera-processor gets it whenever it (re)subscribes.
++        client.publish(self.config_topic, json.dumps(self.config_message), qos=1, retain=True)
++        self._connected.set()
++        self.last_error = None
++        logger.info("connected to frame broker %s:%s; config sent on %s",
++                    self.broker_ip, self.broker_port, self.config_topic)
++
++    def _on_disconnect(self, _client, _userdata, *args):
++        self._connected.clear()
++        if self._closing:
++            return
++        self.last_error = "disconnected from frame broker"
++        logger.warning("lost frame broker %s:%s; reconnecting", self.broker_ip, self.broker_port)
++
++    def wait_connected(self, timeout: float) -> bool:
++        return self._connected.wait(timeout)
++
++    def send(self, sample: dict, run_id: str) -> bool:
++        if self._client is None or not self.connected:
++            self.dropped += 1
++            return False
++        header = {
++            "device_id": self.config_message["device_id"],
++            "camera_name": self.config_message["camera_name"],
++            "run_id": run_id,
++            "frame_idx": int(sample["frame_idx"]),
++            "capture_time_ms": int(sample["capture_time_ms"]),
++            "sent_at_ms": int(time.time() * 1000),
++        }
++        info = self._client.publish(self.frame_topic, encode_frame(header, sample["jpeg"]), qos=self.qos)
++        if info.rc != 0:
++            self.dropped += 1
++            self.last_error = f"publish failed rc={info.rc}"
++            return False
++        self.sent += 1
++        return True
++
++    def close(self) -> None:
++        if self._client is None:
++            return
++        self._closing = True
++        try:
++            self._client.loop_stop()
++            self._client.disconnect()
++        except Exception:
++            pass
++        self._client = None
++        self._connected.clear()
+diff --git a/camera-swarm-fusion/docker-compose.yml b/camera-swarm-fusion/docker-compose.yml
+index a60e156..0876c6c 100644
+--- a/camera-swarm-fusion/docker-compose.yml
++++ b/camera-swarm-fusion/docker-compose.yml
+@@ -34,5 +34,11 @@ services:
+       CAMERA_PLC_POLL_S: ${CAMERA_PLC_POLL_S:-0.05}
+       CAMERA_PLC_MAX_RUN_S: ${CAMERA_PLC_MAX_RUN_S:-600}
+       CAMERA_PLC_FAKE: ${CAMERA_PLC_FAKE:-false}
++      # Image processing: local = detect + pose in this container (default);
++      # remote = forward each JPEG to camera-processor (wku-smr-lab-middleware,
++      # camera_processor/) on camera_frames/<DEVICE_ID>_<CAMERA_NAME>/frame.
++      CAMERA_PROCESSING: ${CAMERA_PROCESSING:-local}
++      CAMERA_FRAME_BROKER_IP: ${CAMERA_FRAME_BROKER_IP:-}
++      CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
+     restart: unless-stopped
+     command: ["python3", "-m", "camera_edge"]
+diff --git a/camera-swarm-fusion/requirements-edge.txt b/camera-swarm-fusion/requirements-edge.txt
+index e4aef8b..ea0951d 100644
+--- a/camera-swarm-fusion/requirements-edge.txt
++++ b/camera-swarm-fusion/requirements-edge.txt
+@@ -2,3 +2,5 @@ facade-sdk==0.4.3
+ opencv-contrib-python-headless
+ numpy
+ pycomm3
++# frame_forwarder.py (CAMERA_PROCESSING=remote); also pulled in by facade-sdk
++paho-mqtt>=1.6.1
+diff --git a/camera-swarm-fusion/scripts/remote_processing_smoke.py b/camera-swarm-fusion/scripts/remote_processing_smoke.py
+new file mode 100644
+index 0000000..e9eb2dd
+--- /dev/null
++++ b/camera-swarm-fusion/scripts/remote_processing_smoke.py
+@@ -0,0 +1,212 @@
++"""End-to-end check of CAMERA_PROCESSING=remote against a running camera-processor.
++
++    CAM_PI (camera_host + camera_edge, here)  -> MQTT broker -> camera-processor
++    -> camera/<device> rows                   (read back here and checked)
++
++Needs an MQTT broker with camera-processor (wku-smr-lab-middleware,
++camera_processor/) subscribed to it, e.g. the AMS stack, or locally:
++
++    docker compose up -d mqtt-broker camera-processor     # in the middleware repo
++    python scripts/remote_processing_smoke.py 127.0.0.1 1883
++
++Runs the real camera_host (fake camera drawing ArUco markers 0, 1, 2) and the
++real camera_edge agent in remote mode with a fake PLC playing two
++Data_Start ... Db_Stop runs. Checks that the Pi forwards frames only during a
++run, each run gets its own run_id with frames numbered from 0, rows come back
++on camera/<device> for the target markers only, and every row matches what
++CAMERA_PROCESSING=local computes from the same JPEG.
++"""
++from __future__ import annotations
++
++import csv
++import io
++import json
++import os
++import struct
++import sys
++import tempfile
++import threading
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++os.chdir(ROOT)
++
++import cv2  # noqa: E402
++import numpy as np  # noqa: E402
++import paho.mqtt.client as mqtt  # noqa: E402
++
++import camera_host.fake_source as fake_source  # noqa: E402
++from camera_edge.agent import EdgeAgent  # noqa: E402
++from camera_edge.config import EdgeAgentConfig  # noqa: E402
++from camera_edge.plc_signals import FakePLC  # noqa: E402
++from camera_fusion.output import MqttOutput, NullOutput  # noqa: E402
++from camera_host.manager import CameraHardwareService, build_hardware_factory  # noqa: E402
++from camera_host.server import CameraRequestHandler, ThreadingUnixHTTPServer  # noqa: E402
++
++_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
++_FRAME = np.full((480, 640, 3), 255, np.uint8)
++for _id, (_x, _y) in enumerate([(40, 40), (240, 140), (440, 240)]):
++    _FRAME[_y:_y + 150, _x:_x + 150] = cv2.cvtColor(
++        cv2.aruco.generateImageMarker(_dict, _id, 150), cv2.COLOR_GRAY2BGR
++    )
++_orig_read = fake_source.FakeCameraSource.read
++
++
++def _read_with_markers(self):
++    _img, ts, fid = _orig_read(self)
++    return _FRAME.copy(), ts, fid
++
++
++fake_source.FakeCameraSource.read = _read_with_markers
++
++
++class _Recorder:
++    """A local-mode output sink that keeps the rows MqttOutput would publish."""
++
++    def __init__(self, device_id):
++        self.rows = []
++        self._out = MqttOutput(broker_ip="", broker_port=0, device_id=device_id,
++                               client_type="CAMERA", camera_name="")
++
++    def write_detection(self, ts_unix, frame_idx, marker_id, rvec, tvec, image_path, **kw):
++        self.rows.append(self._out._build_row(ts_unix, frame_idx, marker_id, rvec, tvec, image_path,
++                                              False, None, None, kw.get("length_m"), kw.get("capture_time")))
++
++
++def _client(client_id):
++    if hasattr(mqtt, "CallbackAPIVersion"):
++        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
++    return mqtt.Client(client_id=client_id)
++
++
++def main(argv) -> int:
++    broker = argv[1] if len(argv) > 1 else "127.0.0.1"
++    port = int(argv[2]) if len(argv) > 2 else 1883
++    device_id, name = "999", f"smoke{os.getpid()}"
++    label = f"{device_id}_{name}"
++
++    tmp = Path(tempfile.mkdtemp(prefix="cam-remote-"))
++    sock = str(tmp / "camera.sock")
++    service = CameraHardwareService(
++        backend_name="fake",
++        hardware_factory=build_hardware_factory("fake", None, 15, 640, 480),
++        jpeg_quality=85,
++    )
++    service.start()
++    server = ThreadingUnixHTTPServer(sock, CameraRequestHandler, service)
++    threading.Thread(target=server.serve_forever, daemon=True).start()
++
++    # What crosses the wire: forwarded frames, and the rows camera-processor sends back
++    frames, rows, lock = {}, [], threading.Lock()
++    t0 = time.time()
++
++    def on_message(_c, _u, msg):
++        with lock:
++            if msg.topic == f"camera_frames/{label}/frame":
++                (n,) = struct.unpack_from(">I", msg.payload, 0)
++                header = json.loads(msg.payload[4:4 + n])
++                frames[(header["run_id"], header["frame_idx"])] = (time.time() - t0, header, msg.payload[4 + n:])
++            elif msg.topic == f"camera/{label}":
++                rows.append((time.time() - t0, next(csv.reader(io.StringIO(msg.payload.decode())))))
++
++    sub = _client(f"smoke-sub-{os.getpid()}")
++    sub.on_message = on_message
++    sub.connect(broker, port)
++    sub.subscribe([(f"camera_frames/{label}/frame", 0), (f"camera/{label}", 0)])
++    sub.loop_start()
++
++    timeline = [
++        (1.0, "Data_Start", True), (1.2, "Data_Start", False),
++        (2.5, "Db_Stop", True), (2.7, "Db_Stop", False),
++        (3.5, "Data_Start", True), (3.7, "Data_Start", False),
++        (5.0, "Db_Stop", True),
++    ]
++    os.environ.update({
++        "CAMERA_SOCKET_PATH": sock,
++        "CAMERA_SESSION_ROOT": str(tmp / "sessions"),
++        "CAMERA_EDGE_HEALTH_PATH": str(tmp / "health.json"),
++        "DEVICE_ID": device_id,
++        "CAMERA_NAME": name,
++        "CAMERA_FPS": "15",
++        "CAMERA_WIDTH": "640",
++        "CAMERA_HEIGHT": "480",
++        "CAMERA_MARKER_LENGTH_M": "0.05",
++        "CAMERA_MARKER_LENGTHS_M": "0:0.15,1:0.05,2:0.05",
++        "CAMERA_TARGET_IDS": "1,2",
++        "CAMERA_PLC_TRIGGER": "true",
++        "CAMERA_PLC_POLL_S": "0.02",
++        "CAMERA_RECONNECT_DELAY_S": "0.2",
++        "CAMERA_PROCESSING": "remote",
++        "MQTT_BROKER_IP": broker,
++        "MQTT_BROKER_PORT": str(port),
++    })
++    config = EdgeAgentConfig.from_env()
++    assert config.remote_processing and config.plc_trigger
++
++    agent = EdgeAgent(config, plc_factory=lambda: FakePLC(timeline=timeline))
++    agent.install_signal_handlers = lambda: None
++    t0 = time.time()
++    worker = threading.Thread(target=agent.run, daemon=True)
++    worker.start()
++    time.sleep(6.0)
++    agent._stop_requested = True
++    worker.join(timeout=15)
++    time.sleep(1.5)  # let camera-processor finish the last frames
++    sub.loop_stop()
++    server.shutdown()
++    server.server_close()
++    service.close()
++
++    ok = True
++
++    def check(cond, msg):
++        nonlocal ok
++        print(("PASS  " if cond else "FAIL  ") + msg)
++        ok &= bool(cond)
++
++    runs = sorted({run for run, _ in frames})
++    check(len(runs) == 2, f"two PLC runs -> two run ids ({runs})")
++    for run in runs:
++        idx = sorted(i for r, i in frames if r == run)
++        check(idx and idx[0] == 0 and idx == list(range(len(idx))), f"{run}: {len(idx)} frames forwarded, numbered 0..")
++    in_run = lambda t: 0.9 <= t <= 2.7 or 3.4 <= t <= 5.2  # noqa: E731
++    check(frames and all(in_run(t) for t, _h, _j in frames.values()),
++          "frames forwarded only between Data_Start and Db_Stop")
++    check(not (tmp / "sessions").exists() or not any((tmp / "sessions").iterdir()),
++          "nothing processed or saved on the Pi")
++
++    check(rows, f"camera-processor published {len(rows)} rows on camera/{label}")
++    check({r[3] for _t, r in rows} == {"1", "2"}, f"target markers only: {sorted({r[3] for _t, r in rows})}")
++    check(all(len(r) == 13 and r[12] == device_id for _t, r in rows), "row layout: 13 fields, device_id last")
++
++    # Same JPEG through the local (on-Pi) pipeline -> same numbers
++    local = EdgeAgent(EdgeAgentConfig.from_env())
++    local.config.save_frames = local.config.save_annotated = False
++    local._forwarder = None
++    mismatches = compared = 0
++    by_frame = {}
++    for _t, r in rows:
++        by_frame.setdefault((r[0], r[1]), []).append(r)
++    for (_run, frame_idx), (_t, header, jpeg) in frames.items():
++        remote_rows = by_frame.get((str(frame_idx), f"{header['capture_time_ms'] / 1000:.6f}"))
++        if not remote_rows:
++            continue
++        rec = _Recorder(device_id)
++        local._process_frame({"jpeg": jpeg, "frame_idx": frame_idx, "capture_time_ms": header["capture_time_ms"]},
++                             NullOutput(), rec)
++        want = sorted([str(v) for i, v in enumerate(row) if i not in (2, 11)] for row in rec.rows)
++        got = sorted([v for i, v in enumerate(row) if i not in (2, 11)] for row in remote_rows)
++        compared += 1
++        mismatches += want != got
++        if want != got and mismatches == 1:
++            print("  local :", want, "\n  remote:", got)
++    check(compared and not mismatches, f"remote rows == local rows for {compared} frames ({mismatches} differ)")
++    check(not worker.is_alive(), "agent stopped cleanly")
++    print("\nOK" if ok else "\nFAILED")
++    return 0 if ok else 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main(sys.argv))
+diff --git a/camera-swarm-fusion/tests/test_camera_edge_remote.py b/camera-swarm-fusion/tests/test_camera_edge_remote.py
+new file mode 100644
+index 0000000..dcd46af
+--- /dev/null
++++ b/camera-swarm-fusion/tests/test_camera_edge_remote.py
+@@ -0,0 +1,114 @@
++"""CAMERA_PROCESSING=remote: config, wire format and the frame forwarder.
++
++The full Pi -> camera-processor round trip (and remote rows == local rows) is
++scripts/remote_processing_smoke.py, which needs a broker and camera-processor.
++"""
++import json
++import struct
++from types import SimpleNamespace
++
++import numpy as np
++import pytest
++
++from camera_edge.config import EdgeAgentConfig
++from camera_edge.frame_forwarder import FrameForwarder, build_config_message, encode_frame
++
++
++def test_processing_defaults_to_local(monkeypatch):
++    for name in ("CAMERA_PROCESSING", "CAMERA_FRAME_BROKER_IP", "CAMERA_FRAME_BROKER_PORT"):
++        monkeypatch.delenv(name, raising=False)
++    monkeypatch.setenv("MQTT_BROKER_IP", "10.0.0.1")
++    cfg = EdgeAgentConfig.from_env()
++    assert cfg.processing == "local" and not cfg.remote_processing
++    assert cfg.frame_broker_ip == "10.0.0.1"  # blank -> the row broker
++    assert cfg.frame_topic_prefix == "camera_frames"
++
++
++def test_remote_settings_from_env(monkeypatch):
++    monkeypatch.setenv("CAMERA_PROCESSING", " Remote ")
++    monkeypatch.setenv("CAMERA_FRAME_BROKER_IP", "10.0.0.9")
++    monkeypatch.setenv("CAMERA_FRAME_BROKER_PORT", "1884")
++    cfg = EdgeAgentConfig.from_env()
++    assert cfg.remote_processing
++    assert (cfg.frame_broker_ip, cfg.frame_broker_port) == ("10.0.0.9", 1884)
++
++
++def test_bad_processing_value_fails_fast(monkeypatch):
++    monkeypatch.setenv("CAMERA_PROCESSING", "cloud")
++    with pytest.raises(ValueError):
++        EdgeAgentConfig.from_env()
++
++
++def test_frame_encoding():
++    payload = encode_frame({"run_id": "r", "frame_idx": 3}, b"\xff\xd8jpeg")
++    (n,) = struct.unpack_from(">I", payload, 0)
++    header = json.loads(payload[4:4 + n])
++    assert header == {"v": 1, "run_id": "r", "frame_idx": 3}
++    assert payload[4 + n:] == b"\xff\xd8jpeg"
++
++
++def _config(**kw):
++    values = dict(device_id="113", camera_name="front", client_type="CAMERA", aruco_dict="4x4_50",
++                  marker_length_m=0.0485, marker_lengths_m={1: 0.1}, target_ids=[1, 2],
++                  calibration_path="calib/x.yml", fps=15, width=1920, height=1080, plc_trigger=True)
++    values.update(kw)
++    return SimpleNamespace(**values)
++
++
++def test_config_message_is_json_ready():
++    K = np.array([[1000.0, 0, 960], [0, 1000.0, 540], [0, 0, 1]])
++    msg = build_config_message(_config(), K, np.zeros((1, 5)), (1920, 1080))
++    json.dumps(msg)
++    assert msg["camera_matrix"][0] == [1000.0, 0.0, 960.0]
++    assert msg["dist_coeffs"] == [0.0] * 5
++    assert msg["marker_lengths_m"] == {"1": 0.1} and msg["target_ids"] == [1, 2]
++
++
++class _FakeClient:
++    def __init__(self, _client_id):
++        self.published = []
++        self.on_connect = self.on_disconnect = None
++
++    def reconnect_delay_set(self, **_kw): pass
++    def max_queued_messages_set(self, _n): pass
++    def connect_async(self, *_a, **_kw): pass
++    def loop_start(self): pass
++    def loop_stop(self): pass
++    def disconnect(self): self.on_disconnect(self, None, 0)
++
++    def publish(self, topic, payload, qos=0, retain=False):
++        self.published.append((topic, payload, qos, retain))
++        return SimpleNamespace(rc=0)
++
++
++def _forwarder():
++    msg = {"device_id": "113", "camera_name": "front"}
++    fwd = FrameForwarder("broker", 1883, "camera_frames", msg, client_factory=_FakeClient)
++    fwd.open()
++    return fwd, fwd._client
++
++
++def test_forwarder_sends_config_on_connect_and_frames_after():
++    fwd, client = _forwarder()
++    sample = {"jpeg": b"jpg", "frame_idx": 0, "capture_time_ms": 1000}
++    assert fwd.send(sample, "run") is False and fwd.dropped == 1  # not connected yet
++
++    client.on_connect(client, None, {}, 0)
++    topic, payload, qos, retain = client.published[0]
++    assert (topic, retain, qos) == ("camera_frames/113_front/config", True, 1)
++
++    assert fwd.send(sample, "run") is True
++    topic, payload, _qos, retain = client.published[1]
++    assert topic == "camera_frames/113_front/frame" and not retain
++    (n,) = struct.unpack_from(">I", payload, 0)
++    assert json.loads(payload[4:4 + n])["run_id"] == "run"
++    assert payload[4 + n:] == b"jpg"
++
++    client.on_disconnect(client, None, 0)
++    assert fwd.send(sample, "run") is False and fwd.dropped == 2
++    fwd.close()
++
++
++def test_forwarder_refuses_the_ingested_prefix():
++    with pytest.raises(ValueError):
++        FrameForwarder("b", 1883, "camera", {"device_id": "1", "camera_name": "x"})
+-- 
+2.43.0
+

@@ -9,9 +9,10 @@
 
 | Service | Image / build | Purpose |
 | --- | --- | --- |
-| `mqtt-broker` | `eclipse-mosquitto:2` | Receives IMU (`imu/#`) and camera (`camera/#`) messages. Config mounted from `mqtt_conf/`. |
+| `mqtt-broker` | `eclipse-mosquitto:2` | Receives IMU (`imu/#`) and camera (`camera/#`) messages, and the camera Pis' JPEG frames (`camera_frames/#`). Config mounted from `mqtt_conf/`. |
 | `fastapi-app` | built from `Dockerfile` | HTTP API ([reference](/docker/api)), WebSocket broadcast, MQTT subscriber, batched IMU/camera inserts, sessions, capture state, backups, PLC auto stop, run parameters. |
 | `tcp` | built from `tcp_server/dockerfile` | Raw TCP listener for robot telemetry; batched robot inserts. |
+| `camera-processor` | built from `camera_processor/Dockerfile` | ArUco detection + pose for the camera Pis' frames; publishes the rows on `camera/#`. See [Camera processor](/docker/camera-processor). |
 | `web` | built from `web/dockerfile` | React/Vite dashboard + this VitePress docs site, served by nginx. |
 | `stack-controller` | built from `stack_controller/Dockerfile` | Deploys/removes the edge Swarm stack for `fastapi-app`; container watchdog; read-only container status and logs. See [Stack controller](/docker/stack-controller). |
 | `ntp` | `cturra/ntp:latest` | Shared time source (see [Automations](/docker/automations)). |
@@ -94,6 +95,7 @@ Every container is set up to come back by itself and to say why it isn't working
 | `nas_backups` | NFS → NAS `/volume1/docker/postgres/backups` | `pg_dump` backups |
 | `logs` | NFS → NAS `/volume1/docker/postgres/logs` | log files from `fastapi-app` and `tcp` |
 | `fastapi_state` | local | run parameters |
+| `camera_data` | local | camera-processor's run folders (frames, annotated frames, detections.csv) |
 | `pgadmin_data` | local | pgAdmin users, servers, query history |
 | `chrony-state` | local | NTP state |
 | `postgres_data` | local | only with the `local-db` profile |

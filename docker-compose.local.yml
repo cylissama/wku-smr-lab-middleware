@@ -15,7 +15,7 @@
 #   docker compose -f docker-compose.local.yml down
 #
 # Mirrors docker-compose.yml service-for-service; keep the two in sync by hand
-# when changing mqtt-broker/fastapi-app/tcp/web/ntp config.
+# when changing mqtt-broker/fastapi-app/tcp/camera-processor/web/ntp config.
 #
 # stack-controller (Swarm stack deploy/remove for the IMU/camera edge nodes)
 # needs the local Docker Engine to be a Swarm manager -- a plain Docker
@@ -256,6 +256,37 @@ services:
     depends_on:
       - postgres
 
+  camera-processor:
+    build:
+      context: .
+      dockerfile: camera_processor/Dockerfile
+    container_name: AMS-camera-processor-local
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-m", "camera_processor", "healthcheck"]
+      <<: *healthcheck-timing
+    labels:
+      smr.description: "Camera image processing (Python, OpenCV), moved off the camera Pis. Takes each Pi's JPEG frames from camera_frames/<device>/frame, detects ArUco markers, estimates their pose and publishes the rows to camera/<device>. Keeps each run's frames and detections.csv."
+      smr.monitor: "true"
+      smr.autoheal: "true"
+    environment:
+      - SERVICE_NAME=camera-processor
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - CAMERA_FRAME_BROKER_HOST=${CAMERA_FRAME_BROKER_HOST:-}
+      - CAMERA_FRAME_BROKER_PORT=${CAMERA_FRAME_BROKER_PORT:-}
+      - CAMERA_FRAME_TOPIC_PREFIX=${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
+      - CAMERA_QUEUE_FRAMES=${CAMERA_QUEUE_FRAMES:-60}
+      - CAMERA_SAVE_FRAMES=${CAMERA_SAVE_FRAMES:-true}
+      - CAMERA_SAVE_ANNOTATED=${CAMERA_SAVE_ANNOTATED:-true}
+      - CAMERA_SAVE_CSV=${CAMERA_SAVE_CSV:-true}
+      - CAMERA_DATA_ROOT=/data
+    volumes:
+      - camera_data_local:/data
+    depends_on:
+      - mqtt-broker
+
   ntp:
     image: cturra/ntp:latest
     container_name: AMS-ntp-local
@@ -282,3 +313,4 @@ volumes:
   pgadmin_data_local:
   db_backups_local:
   app_logs_local:
+  camera_data_local:

@@ -186,6 +186,44 @@ services:
     volumes:
       - logs:/tcp-server/logs
 
+  # Image processing for the camera Pis, moved off the Pis: each Pi forwards its
+  # JPEG frames on camera_frames/<device>/frame, this runs ArUco detection + pose
+  # and publishes the marker rows on camera/<device>, which fastapi-app ingests
+  # as before. See web/docs/docker/camera-processor.md.
+  camera-processor:
+    build:
+      context: .
+      dockerfile: camera_processor/Dockerfile
+    container_name: AMS-camera-processor
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-m", "camera_processor", "healthcheck"]
+      <<: *healthcheck-timing
+    labels:
+      smr.description: "Camera image processing (Python, OpenCV), moved off the camera Pis. Takes each Pi's JPEG frames from camera_frames/<device>/frame, detects ArUco markers, estimates their pose and publishes the rows to camera/<device>. Keeps each run's frames and detections.csv."
+      smr.monitor: "true"
+      smr.autoheal: "true"
+    environment:
+      - SERVICE_NAME=camera-processor
+      # Rows go to the broker fastapi-app reads (container port, not MQTT_PORT)
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      # Frames come from the same broker unless these are set
+      - CAMERA_FRAME_BROKER_HOST=${CAMERA_FRAME_BROKER_HOST:-}
+      - CAMERA_FRAME_BROKER_PORT=${CAMERA_FRAME_BROKER_PORT:-}
+      - CAMERA_FRAME_TOPIC_PREFIX=${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
+      - CAMERA_QUEUE_FRAMES=${CAMERA_QUEUE_FRAMES:-60}
+      - CAMERA_SAVE_FRAMES=${CAMERA_SAVE_FRAMES:-true}
+      - CAMERA_SAVE_ANNOTATED=${CAMERA_SAVE_ANNOTATED:-true}
+      - CAMERA_SAVE_CSV=${CAMERA_SAVE_CSV:-true}
+      - CAMERA_DATA_ROOT=/data
+    volumes:
+      # Local volume: frames are written at camera rate, too much for the soft NFS mounts
+      - camera_data:/data
+    depends_on:
+      - mqtt-broker
+
   ntp:
     image: cturra/ntp:latest
     container_name: AMS-ntp
@@ -277,6 +315,7 @@ services:
 volumes:
   chrony-state:
   fastapi_state:
+  camera_data:
   postgres_data:
   pgadmin_data:
   nas_backups:

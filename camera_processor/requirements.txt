@@ -1,0 +1,6 @@
+# opencv-contrib for cv2.aruco. Pinned to 4.x: OpenCV 5 removed
+# aruco.estimatePoseSingleMarkers, which the camera Pis' pose numbers come from
+# (pipeline.py falls back to solvePnP IPPE_SQUARE, which differs slightly).
+opencv-contrib-python-headless==4.11.0.86
+numpy>=2,<3
+paho-mqtt>=2,<3

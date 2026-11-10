@@ -35,23 +35,25 @@ model {
     cameraNode = zone 'Camera node' {
       description 'A Pi with a camera. Three of them: camera-front (113), camera-side (114) and camera-cam3 (115).'
       link /docs/hardware/camera 'Camera nodes'
-      link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
+      link https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/plc_update 'Camera edge repo (plc_update)'
 
       camera = device 'Camera' {
         #placeholder
         technology 'V4L2 /dev/video0'
         description 'Placeholder: camera model.'
       }
-      cameraHost = hostService 'Camera host service' {
-        #placeholder
-        description 'Placeholder: what provides /run/camera-hw on the Pi, how it is installed and run (systemd unit?), and how camera-edge:latest gets onto the Pi.'
+      cameraHost = hostService 'camera_host' {
+        technology 'Python + OpenCV, systemd unit camera-hw'
+        description 'Owns /dev/video0 (V4L2, MJPG). Idle until a session starts, then grabs frames at CAMERA_FPS, JPEG-encodes them and serves them on a small HTTP API on /run/camera-hw/camera.sock: readyz, status, session start/stop, frame stream.'
         link /docs/hardware/camera 'Camera nodes'
+        link https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/plc_update/camera-swarm-fusion/camera_host 'camera_host'
       }
       cameraEdge = service 'camera_edge' {
         #perRun
         technology 'camera-edge:latest, Swarm service edge_camera-<name>'
-        description 'ArUco marker pose detection. Publishes each frame with a detected marker to camera/<id>_<name>; no marker in view means no messages. With CAMERA_PLC_TRIGGER on (recording), waits for the PLC Data_Start first.'
-        link https://github.com/UmarKhattab09/camera_sensor_fusion 'camera_sensor_fusion repo'
+        description 'Starts a session on camera_host and forwards each JPEG unchanged to camera-processor on camera_frames/<id>_<name>/frame, with its calibration in a retained config message (CAMERA_PROCESSING=remote; with local it detects markers itself, as before). With CAMERA_PLC_TRIGGER on (recording), sends only between the PLC Data_Start and Db_Stop.'
+        link https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/plc_update/camera-swarm-fusion/camera_edge 'camera_edge'
+        link /docs/docker/camera-processor 'Camera processor'
       }
 
       cameraHost -[local]-> camera 'reads frames'
