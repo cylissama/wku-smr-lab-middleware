@@ -51,6 +51,23 @@ def live_tasks(stack_name: str) -> list[str]:
     return sorted(live)
 
 
+# Every Swarm node as {hostname, addr, labels, state}: addr is the address it
+# joined the swarm with (its lab-subnet IP). Raises if Docker can't be reached.
+def list_nodes() -> list[dict]:
+    client = docker.from_env()
+    try:
+        nodes = client.api.nodes()
+    finally:
+        client.close()
+
+    return [{
+        "hostname": n.get("Description", {}).get("Hostname"),
+        "addr": n.get("Status", {}).get("Addr"),
+        "labels": n.get("Spec", {}).get("Labels") or {},
+        "state": n.get("Status", {}).get("State"),
+    } for n in nodes]
+
+
 # The parts of a container spec a redeploy of ours changes (env overrides,
 # image, command). A task whose spec differs belongs to an older deploy.
 _SPEC_KEYS = ("Image", "Env", "Args", "Command")

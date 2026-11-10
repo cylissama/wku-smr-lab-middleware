@@ -4,7 +4,7 @@
 deployment {
 
   network cell '192.168.1.x' {
-    description 'Robot cell network. The IMU and camera Pis are on it too (bench IMU on 192.168.4.x).'
+    description 'Robot cell network. The IMU and camera Pis are on it too.'
 
     host robot 'FANUC controller' {
       technology '192.168.1.100'

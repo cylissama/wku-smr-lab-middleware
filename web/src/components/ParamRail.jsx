@@ -144,7 +144,7 @@ export default function ParamRail({ params, editable, captureMode, loadError, on
         <aside className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm" aria-label="Run parameters">
             <div className="mb-3 flex items-baseline justify-between gap-2 border-b border-gray-200 pb-3">
                 <h2 className="text-base font-semibold text-gray-900">Run Parameters</h2>
-                <span className="text-xs text-gray-500">{locked ? "Locked" : "Editable"}</span>
+                <span className="text-xs text-gray-500">{locked && "Locked"}</span>
             </div>
 
             {locked && (

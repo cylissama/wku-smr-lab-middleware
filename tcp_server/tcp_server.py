@@ -312,8 +312,9 @@ async def handle_robot(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
                     if not capture.accepts("robot", "main"):
                         continue
 
+                    # tick feeds /queue/status activity; the [live] line is monitor-only
                     rate = live_sampler.tick("robot/main")
-                    if rate is not None:
+                    if rate is not None and not capture.should_store():
                         send_to_fastapi_nowait(f"[live] robot/main · {live_sampler.describe_rate(rate)} · {format_robot_sample(data)}", "live")
 
                     if capture.should_store():

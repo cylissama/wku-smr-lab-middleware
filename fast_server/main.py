@@ -598,7 +598,7 @@ async def deploy_managed_stacks(plan: dict[str, list[str]] | None = None,
 
 # The robot isn't a Swarm service -- it streams to tcp_server on its own
 ROBOT_DEVICE = {"key": device_key("robot", "main"), "category": "robot", "device_label": "main",
-                "stack": None, "service": None}
+                "stack": None, "service": None, "joint": None, "node": None, "ip": None}
 
 # Every selectable device: each managed stack's services that carry
 # smr.category/smr.device labels (see deploy/swarm-edge-nodes.yml), plus the robot
@@ -618,6 +618,11 @@ async def load_device_catalog() -> list[dict[str, Any]]:
                     "device_label": svc["device_label"],
                     "stack": stack,
                     "service": svc["service"],
+                    # smr.joint label (IMUs), and the Swarm node it's pinned to
+                    # with that node's IP; None when unknown
+                    "joint": svc.get("joint"),
+                    "node": svc.get("node"),
+                    "ip": svc.get("ip"),
                 })
 
     devices.append(dict(ROBOT_DEVICE))
@@ -1656,11 +1661,13 @@ def format_camera_sample(d: dict[str, Any]) -> str:
     return (f"frame {d['frame_idx']} marker {d['marker_idx']} "
             f"tvec ({d['tvec_x']:.3f}, {d['tvec_y']:.3f}, {d['tvec_z']:.3f})")
 
-# Sends a throttled "[live]" sample of a device's data to its dashboard channel
+# Sends a throttled "[live]" sample of a device's data to its dashboard channel.
+# Only while monitoring: in RECORD the tick still runs (it feeds /devices'
+# receiving/rate) but the line isn't sent, so the message boxes stay readable.
 async def send_live_sample(manager, category: str, data: dict[str, Any], fmt) -> None:
     key = device_key(category, data["device_label"])
     rate = live_sampler.tick(key)
-    if rate is None:
+    if rate is None or capture.should_store():
         return
     await broadcast_message(manager, f"[live] {key} · {LiveSampler.describe_rate(rate)} · {fmt(data)}", "live")
 

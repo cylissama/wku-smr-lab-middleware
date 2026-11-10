@@ -11,7 +11,7 @@ The host service must work before the container can use the IMU.
 
 ## 1. Prepare the Pi
 
-The Pi should be on the lab network with a fixed address (see the [IP Address Table](/network/ip-addresses)) and a **unique hostname**, because the stack pins each IMU service by hostname. Existing IMU Pis are `RPIIMUJ1` … `RPIIMUJ5`.
+The Pi should be on the lab network with a fixed address (see the [IP Address Table](/network/ip-addresses)) and a **unique hostname**, because the stack pins each IMU service by hostname. Existing IMU Pis are `RPIIMUJ1` … `RPIIMUJ6`.
 
 Put the [IMU edge repo](https://github.com/cylissama/wku-smr-lab-imu-edge-node) at `/opt/smart-mfg-imu` (the stack mounts `/opt/smart-mfg-imu/data`), and create a virtual environment:
 
@@ -154,7 +154,7 @@ docker node update --label-add camera=front <node-name>   # or camera=side, came
 
 On the AMS host, in `/home/ubuntu/wku-smr-lab-middleware`:
 
-1. In `deploy/swarm-edge-nodes.yml`, copy an existing `imu-1xx` service block and change every `IMU_1xx_` variable to the new id. Keep the `smr.category` / `smr.device` labels; they put the device on the dashboard. Update its `smr.description` label too, then run `python architecture/sync.py` so the new Pi appears on the [architecture diagram](/expanding/architecture).
+1. In `deploy/swarm-edge-nodes.yml`, copy an existing `imu-1xx` service block and change every `IMU_1xx_` variable to the new id. Keep the `smr.category` / `smr.device` labels; they put the device on the dashboard. Set `smr.joint` to the robot joint the Pi is mounted on (`J1` … `J6`); the dashboard shows it, plus the Pi's IP, on the device's tile. Update its `smr.description` label too, then run `python architecture/sync.py` so the new Pi appears on the [architecture diagram](/expanding/architecture).
 2. Add `IMU_<id>_DEVICE_ID` and `IMU_<id>_HOSTNAME` to `deploy/.env`, and to `deploy/.env.example` (with the real hostname, no secrets).
 3. Reload the dashboard. The new device shows up in the Devices box; no restart is needed because stack-controller reads both files on each request.
 

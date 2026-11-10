@@ -13,8 +13,7 @@ docker node ls
 | Node | Role | Runs |
 | --- | --- | --- |
 | IIoT | manager (leader) | nothing from the edge stack; it's where stacks are deployed from |
-| RPIIMUJ1 … RPIIMUJ5 | worker | `imu-106` … `imu-110` |
-| RPI-IMU-BENCH | worker | `imu-111` (bench node) |
+| RPIIMUJ1 … RPIIMUJ6 | worker | `imu-106` … `imu-111` |
 | RPiCamFront | worker, label `camera=front` | `camera-front` |
 | CameraPi2 | worker, label `camera=side` | `camera-side` |
 | RPICAM3 | worker, label `camera=cam3` | `camera-cam3` |
@@ -32,7 +31,7 @@ Each service has:
 | Image | `smart-mfg-imu:latest` (local on the Pi) | `camera-edge:latest` (local on the Pi) |
 | Placement | `node.hostname == ${IMU_<id>_HOSTNAME}` | `node.labels.camera == front` / `side` / `cam3` |
 | Mounts from the Pi | `/run/imu-hw` (socket to `imu_host`), `/opt/smart-mfg-imu/data` | `/run/camera-hw`, `/opt/camera-sensor-fusion/data` |
-| Labels | `smr.category: imu`, `smr.device: <id>` | `smr.category: camera`, `smr.device: <id>_<name>` |
+| Labels | `smr.category: imu`, `smr.device: <id>`, `smr.joint: J<n>` | `smr.category: camera`, `smr.device: <id>_<name>` |
 | Health check | `python3 -m imu_edge healthcheck`, every 10 s, 15 s warm-up | `python3 -m camera_edge healthcheck`, every 10 s, 30 s warm-up |
 | Restart | `on-failure` | `any` |
 

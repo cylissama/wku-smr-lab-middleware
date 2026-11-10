@@ -4,6 +4,8 @@ import "./App.css";
 
 const AI_URL = import.meta.env.VITE_AI_URL;
 const TWINS_URL = import.meta.env.VITE_TWINS_URL;
+// This repo: the AMS host's services (broker stack, dashboard, docs)
+const GITHUB_URL = "https://github.com/cylissama/wku-smr-lab-middleware";
 
 // Every nav item shares one size; only the colors differ for the current page.
 const NAV_ITEM =
@@ -26,6 +28,15 @@ function App() {
 
             <a href="/docs/" className={`${NAV_ITEM} ${NAV_IDLE}`}>
               Documentation
+            </a>
+
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              className={`${NAV_ITEM} ${NAV_IDLE}`}
+            >
+              GitHub
             </a>
 
             {AI_URL ? (

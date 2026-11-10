@@ -8,11 +8,10 @@ How the parts of the system reach each other. Every address is in the [IP Addres
  │ FANUC robot       192.168.1.100 ────┼─ TCP ───►│ AMS host "IIoT"          │
  │ Cell PLC (L32E)   192.168.1.103 ◄───┼─ CIP ────│ 192.168.2.100            │
  │ NAS (Postgres)    192.168.1.104 ◄───┼─ SQL/NFS─│  docker-compose stack    │
- │ IMU Pis           192.168.1.106–110 ┼─ MQTT ──►│  + Swarm manager         │
+ │ IMU Pis           192.168.1.106–111 ┼─ MQTT ──►│  + Swarm manager         │
  │ Camera Pis        192.168.1.113–114 ┼─ MQTT ──►│                          │
  └─────────────────────────────────────┘          └──────────────────────────┘
         IMU Pis also read the PLC (CIP) directly.
-        The bench IMU Pi (RPI-IMU-BENCH) is on 192.168.4.x.
 ```
 
 ::: info Placeholder

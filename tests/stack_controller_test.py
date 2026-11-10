@@ -20,6 +20,10 @@ services:
       labels:
         smr.category: imu
         smr.device: "${IMU_106_DEVICE_ID}"
+        smr.joint: "J1"
+      placement:
+        constraints:
+          - node.hostname == ${IMU_106_HOSTNAME}
     environment:
       MQTT_TOPIC: imu/${IMU_106_DEVICE_ID}
   camera-front:
@@ -28,6 +32,8 @@ services:
       labels:
         - smr.category=camera
         - smr.device=${CAMERA_FRONT_DEVICE_ID:-999}
+      placement:
+        constraints: [node.labels.camera == front]
   helper:
     image: busybox
 networks:
@@ -53,7 +59,7 @@ class StackControllerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
         (root / "edge.yml").write_text(COMPOSE)
-        (root / ".env").write_text("IMU_106_DEVICE_ID=106\nIMU_PLC_TRIGGER=false\n")
+        (root / ".env").write_text("IMU_106_DEVICE_ID=106\nIMU_106_HOSTNAME=RPIIMUJ1\nIMU_PLC_TRIGGER=false\n")
         (root / "stacks.yml").write_text(yaml.safe_dump({"stacks": {"edge": {
             "compose_file": str(root / "edge.yml"),
             "env_file": str(root / ".env"),
@@ -89,15 +95,43 @@ class StackControllerTests(unittest.TestCase):
         self.env.stop()
         self.tmp.cleanup()
 
+    NODES = [
+        {"hostname": "RPIIMUJ1", "addr": "192.168.1.106", "labels": {}, "state": "ready"},
+        {"hostname": "RPiCamFront", "addr": "192.168.1.113", "labels": {"camera": "front"}, "state": "down"},
+        {"hostname": "AMS", "addr": "192.168.2.100", "labels": {}, "state": "ready"},
+    ]
+
     def test_services_lists_labelled_devices(self):
-        resp = self.client.get("/stacks/edge/services", headers=self.headers)
+        with patch.object(sc.docker_ops, "list_nodes", return_value=self.NODES):
+            resp = self.client.get("/stacks/edge/services", headers=self.headers)
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["services"], [
-            {"service": "imu-106", "category": "imu", "device_label": "106"},
-            {"service": "camera-front", "category": "camera", "device_label": "999"},
-            {"service": "helper", "category": None, "device_label": None},
+            {"service": "imu-106", "category": "imu", "device_label": "106", "joint": "J1",
+             "node": "RPIIMUJ1", "ip": "192.168.1.106"},
+            {"service": "camera-front", "category": "camera", "device_label": "999", "joint": None,
+             "node": "RPiCamFront", "ip": "192.168.1.113"},
+            {"service": "helper", "category": None, "device_label": None, "joint": None, "node": None, "ip": None},
         ])
+
+    def test_services_listed_without_node_info_when_docker_unreachable(self):
+        with patch.object(sc.docker_ops, "list_nodes", side_effect=RuntimeError("no docker")):
+            resp = self.client.get("/stacks/edge/services", headers=self.headers)
+
+        imu = resp.json()["services"][0]
+        self.assertEqual((imu["joint"], imu["node"], imu["ip"]), ("J1", None, None))
+
+    def test_placement_node_needs_exactly_one_match(self):
+        nodes = self.NODES + [{"hostname": "Other", "addr": "192.168.1.200", "labels": {"camera": "front"}}]
+        spec = lambda *c: {"deploy": {"placement": {"constraints": list(c)}}}
+
+        self.assertEqual(sc.placement_node(spec("node.hostname == AMS"), {}, nodes)["addr"], "192.168.2.100")
+        # two nodes carry the label: ambiguous
+        self.assertIsNone(sc.placement_node(spec("node.labels.camera == front"), {}, nodes))
+        self.assertEqual(sc.placement_node(spec("node.labels.camera == front", "node.hostname != Other"), {}, nodes)["hostname"], "RPiCamFront")
+        self.assertIsNone(sc.placement_node(spec("node.hostname == Gone"), {}, nodes))
+        self.assertIsNone(sc.placement_node(spec("node.role == worker"), {}, nodes))
+        self.assertIsNone(sc.placement_node({}, {}, nodes))
 
     def test_services_requires_token(self):
         self.assertEqual(self.client.get("/stacks/edge/services").status_code, 401)

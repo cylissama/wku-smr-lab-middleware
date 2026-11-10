@@ -124,6 +124,13 @@ body {
   font-weight: 400;
 }
 
+/* Joint and IP line under the device name */
+.dev-where {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  color: #4b5563;
+}
+
 .dev-caption {
   color: var(--tone);
 }

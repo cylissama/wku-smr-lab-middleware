@@ -34,7 +34,7 @@ It also starts a small HTTP **status server** on port `8090` (internal, not publ
 From there, per connection, `handle_robot()`:
 
 - Reads up to 4096 bytes at a time, normalizes `\r\n`/`\r` to `\n`, and splits on newlines to recover individual samples (the robot doesn't need to send exactly one sample per TCP packet).
-- Parses each line as comma-separated fields (see format below), then applies the capture gate. While idle, or if `robot/main` isn't selected, the line is dropped. While monitoring or recording, at most one `[live]` line per second goes to the dashboard's Robot box. Only while **recording** is the line tagged with the session id and pushed onto an in-memory `asyncio.Queue` (`robot_queue`, capacity `QUEUE_SIZE`).
+- Parses each line as comma-separated fields (see format below), then applies the capture gate. While idle, or if `robot/main` isn't selected, the line is dropped. While monitoring (not while recording), at most one `[live]` line per second goes to the dashboard's Robot box. Only while **recording** is the line tagged with the session id and pushed onto an in-memory `asyncio.Queue` (`robot_queue`, capacity `QUEUE_SIZE`).
 - A line that fails to parse is logged as a parse error and dropped — it does **not** close the connection or crash the handler, so one bad sample doesn't take down the rest of the run.
 - When the robot disconnects (or a `read()` returns empty), the handler closes the writer and logs `Writer Closed`.
 
@@ -89,4 +89,4 @@ A bare `-z` probe (no data sent) still exercises the full accept path — you'll
 printf "1,1710000000.0,2024-03-09T12:00:00,0.1,0.2,0.3,0.4,0.5,0.6,10.0,20.0,30.0,1.0,0.0,0.0\n" | nc <mini-pc-ip> <ROBOT_TCP_PORT>
 ```
 
-If the dashboard is monitoring or recording with the robot selected, a `[live]` line appears in the Robot box. While idle, the line is accepted on the socket and then dropped, which is expected and doesn't mean the TCP layer failed.
+If the dashboard is monitoring with the robot selected, a `[live]` line appears in the Robot box (recording doesn't show them; check the robot tile's rate instead). While idle, the line is accepted on the socket and then dropped, which is expected and doesn't mean the TCP layer failed.

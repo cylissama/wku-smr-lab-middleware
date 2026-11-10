@@ -26,7 +26,7 @@ This page contains plaintext credentials for lab network equipment. It is commit
 | RPI_IMU_J3 | 192.168.1.108 | 2C:CF:67:ED:E3:97 | admin | password | |
 | RPI_IMU_J4 | 192.168.1.109 | 2C:CF:67:ED:E4:0B | admin | password | |
 | RPI_IMU_J5 | 192.168.1.110 | 2C:CF:67:BE:B1:4F | admin | password | |
-| RPI_IMU_J6 | 192.168.1.111 | | | | Needs to be built and connected |
+| RPI_IMU_J6 | 192.168.1.111 | | | | Hostname `RPIIMUJ6`; Swarm worker, service `imu-111` (`imu/111`). Replaces the old bench node RPI-IMU-BENCH |
 | RPI_IMU_GT | 192.168.1.112 | | | | Needs to be built and connected |
 | CAMERAFRONT | 192.168.1.113 | 2C:CF:67:4F:7F:BC | admin | admin | |
 | CAMERAPI2 | 192.168.1.114 | 88:a2:9e:02:e2:93 | admin | admin | |
