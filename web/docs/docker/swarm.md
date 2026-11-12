@@ -14,13 +14,14 @@ docker node ls
 | --- | --- | --- |
 | IIoT | manager (leader) | nothing from the edge stack; it's where stacks are deployed from |
 | RPIIMUJ1 … RPIIMUJ6 | worker | `imu-106` … `imu-111` |
-| RPiCamFront | worker, label `camera=front` | `camera-front` |
-| CameraPi2 | worker, label `camera=side` | `camera-side` |
+| RPICAM1 | worker, label `camera=cam1` | `camera-cam1` |
+| RPICAM2 | worker, label `camera=cam2` | `camera-cam2` |
 | RPICAM3 | worker, label `camera=cam3` | `camera-cam3` |
+| RPICAM4 | worker, label `camera=cam4` | `camera-cam4` |
 
 ## The edge stack
 
-All edge devices are in one stack file, `deploy/swarm-edge-nodes.yml`, deployed as stack **`edge`** (so services are named `edge_imu-106`, `edge_camera-front`, …). Its `${VAR}`s come from `deploy/.env` (see [Two `.env` files](/docker/compose#two-env-files)).
+All edge devices are in one stack file, `deploy/swarm-edge-nodes.yml`, deployed as stack **`edge`** (so services are named `edge_imu-106`, `edge_camera-cam1`, …). Its `${VAR}`s come from `deploy/.env` (see [Two `.env` files](/docker/compose#two-env-files)).
 
 **Nobody deploys it by hand in normal use.** Start Monitoring and Start Session make `fastapi-app` ask [stack-controller](/docker/stack-controller) to deploy only the selected devices (`--prune` removes the rest), with the settings for that mode ([PLC trigger](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session), [run parameters](/operations/run-parameters)). Stopping removes the stack.
 
@@ -29,7 +30,7 @@ Each service has:
 | | IMUs | Cameras |
 | --- | --- | --- |
 | Image | `smart-mfg-imu:latest` (local on the Pi) | `camera-edge:latest` (local on the Pi) |
-| Placement | `node.hostname == ${IMU_<id>_HOSTNAME}` | `node.labels.camera == front` / `side` / `cam3` |
+| Placement | `node.hostname == ${IMU_<id>_HOSTNAME}` | `node.labels.camera == cam1` / `cam2` / `cam3` / `cam4` |
 | Mounts from the Pi | `/run/imu-hw` (socket to `imu_host`), `/opt/smart-mfg-imu/data` | `/run/camera-hw`, `/opt/camera-sensor-fusion/data` |
 | Labels | `smr.category: imu`, `smr.device: <id>`, `smr.joint: J<n>` | `smr.category: camera`, `smr.device: <id>_<name>` |
 | Health check | `python3 -m imu_edge healthcheck`, every 10 s, 15 s warm-up | `python3 -m camera_edge healthcheck`, every 10 s, 30 s warm-up |
@@ -53,7 +54,7 @@ Useful checks:
 ```bash
 docker stack services edge
 docker service ps edge_imu-106 --no-trunc
-docker service logs edge_camera-front --since 5m
+docker service logs edge_camera-cam1 --since 5m
 ```
 
 ## Known limitation: I2C device access under Swarm (resolved)

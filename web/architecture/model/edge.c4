@@ -33,7 +33,7 @@ model {
     }
 
     cameraNode = zone 'Camera node' {
-      description 'A Pi with a camera. Three of them: camera-front (113), camera-side (114) and camera-cam3 (115).'
+      description 'A Pi with a camera. Four of them, numbered like their Pis (RPICAM1-4): camera-cam1 (113), camera-cam2 (114), camera-cam3 (115) and camera-cam4 (116).'
       link /docs/hardware/camera 'Camera nodes'
       link https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/plc_update 'Camera edge repo (plc_update)'
 

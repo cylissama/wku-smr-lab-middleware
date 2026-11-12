@@ -12,7 +12,7 @@ camera-processor (AMS)   detection + pose, keeps each run's files
 fastapi-app              ingests camera/# unchanged
 ```
 
-`<device>` is the camera's device key without its category, `<DEVICE_ID>_<CAMERA_NAME>`, e.g. `113_front`. Code: `camera_processor/` (built from `camera_processor/Dockerfile`). Design and test results: `plans/camera-offload-plan.md`.
+`<device>` is the camera's device key without its category, `<DEVICE_ID>_<CAMERA_NAME>`, e.g. `114_cam1`. Code: `camera_processor/` (built from `camera_processor/Dockerfile`). Design and test results: `plans/camera-offload-plan.md`.
 
 ## Turning it on and off
 

@@ -11,8 +11,8 @@
 #   camera_frames/<device>/frame    one camera frame, binary (below)
 #
 # <device> is the device key without its category, <DEVICE_ID>_<CAMERA_NAME>
-# (e.g. 113_front), the same as the smr.device label and the output topic
-# camera/113_front.
+# (e.g. 113_cam1), the same as the smr.device label and the output topic
+# camera/113_cam1.
 #
 # A frame payload is
 #
@@ -58,7 +58,7 @@ def subscription(prefix: str) -> str:
 
 
 def parse_topic(topic: str, prefix: str) -> tuple[str, str]:
-    """camera_frames/113_front/frame -> ("113_front", "frame")."""
+    """camera_frames/113_cam1/frame -> ("113_cam1", "frame")."""
     parts = topic.split("/")
     if len(parts) != 3 or parts[0] != prefix or not parts[1] or parts[2] not in (FRAME, CONFIG):
         raise ProtocolError(f"not a camera frame topic: {topic!r}")

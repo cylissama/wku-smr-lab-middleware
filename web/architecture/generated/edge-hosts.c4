@@ -59,30 +59,39 @@ deployment {
       }
     }
 
-    host camera-front-pi 'Pi with label camera=front' {
-      technology 'edge_camera-front, device camera/113_front'
-      description 'Placement: node.labels.camera == front'
-      camera-front = instanceOf edge.cameraNode {
-        title 'camera-front (camera/113_front)'
-        description 'Front camera. camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_front. When recording it waits for the PLC\'s Data_Start.'
+    host camera-cam1-pi 'Pi with label camera=cam1' {
+      technology 'edge_camera-cam1, device camera/114_cam1'
+      description 'Placement: node.labels.camera == cam1'
+      camera-cam1 = instanceOf edge.cameraNode {
+        title 'camera-cam1 (camera/114_cam1)'
+        description 'Camera 1 (RPICAM1). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam1. When recording it waits for the PLC\'s Data_Start.'
       }
     }
 
-    host camera-side-pi 'Pi with label camera=side' {
-      technology 'edge_camera-side, device camera/114_side'
-      description 'Placement: node.labels.camera == side'
-      camera-side = instanceOf edge.cameraNode {
-        title 'camera-side (camera/114_side)'
-        description 'Side camera. camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_side. When recording it waits for the PLC\'s Data_Start.'
+    host camera-cam2-pi 'Pi with label camera=cam2' {
+      technology 'edge_camera-cam2, device camera/113_cam2'
+      description 'Placement: node.labels.camera == cam2'
+      camera-cam2 = instanceOf edge.cameraNode {
+        title 'camera-cam2 (camera/113_cam2)'
+        description 'Camera 2 (RPICAM2). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam2. When recording it waits for the PLC\'s Data_Start.'
       }
     }
 
     host camera-cam3-pi 'Pi with label camera=cam3' {
-      technology 'edge_camera-cam3, device camera/115_cam3'
+      technology 'edge_camera-cam3, device camera/94_cam3'
       description 'Placement: node.labels.camera == cam3'
       camera-cam3 = instanceOf edge.cameraNode {
-        title 'camera-cam3 (camera/115_cam3)'
-        description 'Third camera (RPICAM3). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam3. When recording it waits for the PLC\'s Data_Start.'
+        title 'camera-cam3 (camera/94_cam3)'
+        description 'Camera 3 (RPICAM3). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam3. When recording it waits for the PLC\'s Data_Start.'
+      }
+    }
+
+    host camera-cam4-pi 'Pi with label camera=cam4' {
+      technology 'edge_camera-cam4, device camera/95_cam4'
+      description 'Placement: node.labels.camera == cam4'
+      camera-cam4 = instanceOf edge.cameraNode {
+        title 'camera-cam4 (camera/95_cam4)'
+        description 'Camera 4 (RPICAM4). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam4. When recording it waits for the PLC\'s Data_Start.'
       }
     }
   }

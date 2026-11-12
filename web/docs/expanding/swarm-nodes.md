@@ -147,7 +147,7 @@ docker node ls
 IMUs need no node label; they're placed by hostname. Cameras are placed by label:
 
 ```bash
-docker node update --label-add camera=front <node-name>   # or camera=side, camera=cam3
+docker node update --label-add camera=cam<N> <node-name>   # cam1 ... cam4, matching RPICAM<N>
 ```
 
 ## 5. Add the device to the edge stack
@@ -173,7 +173,7 @@ On the AMS host, in `/home/ubuntu/wku-smr-lab-middleware`:
 
 ## Adding a camera node
 
-The same Swarm steps apply (join, label `camera=<name>`, add a service block like `camera-front`, add the `CAMERA_<NAME>_*` variables to `deploy/.env`). The device key is `camera/<device_id>_<name>`.
+The same Swarm steps apply (join, label `camera=<name>`, add a service block like `camera-cam1`, add the `CAMERA_<NAME>_*` variables to `deploy/.env`). The device key is `camera/<device_id>_<name>`.
 
 What a camera Pi needs before it joins (as found on RPICAM3):
 

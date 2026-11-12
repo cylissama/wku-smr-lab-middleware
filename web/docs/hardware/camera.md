@@ -1,6 +1,6 @@
 # Camera nodes
 
-Raspberry Pis with cameras take the photos for the camera sensor-fusion pipeline: ArUco marker pose detection (code: [wku-smr-lab-camera-edge-node](https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/plc_update), branch `plc_update`, `camera-swarm-fusion/`). Each frame's marker poses are published over MQTT to `camera/<device_id>_<name>`, for example `camera/113_front`. A message is sent only for frames where a marker is detected, so **no marker in view means no messages**, and the Devices box then shows *running · no data*.
+Raspberry Pis with cameras take the photos for the camera sensor-fusion pipeline: ArUco marker pose detection (code: [wku-smr-lab-camera-edge-node](https://github.com/UmarKhattab09/wku-smr-lab-camera-edge-node/tree/plc_update), branch `plc_update`, `camera-swarm-fusion/`). Each frame's marker poses are published over MQTT to `camera/<device_id>_<name>`, for example `camera/114_cam1`. A message is sent only for frames where a marker is detected, so **no marker in view means no messages**, and the Devices box then shows *running · no data*.
 
 ## Where each step runs
 
@@ -16,11 +16,12 @@ Raspberry Pis with cameras take the photos for the camera sensor-fusion pipeline
 
 | Swarm service | Device key / MQTT topic | Pi (hostname) | Placement |
 | --- | --- | --- | --- |
-| `camera-front` | `camera/113_front` | RPiCamFront | `node.labels.camera == front` |
-| `camera-side` | `camera/114_side` | CameraPi2 | `node.labels.camera == side` |
-| `camera-cam3` | `camera/115_cam3` | RPICAM3 (192.168.1.94) | `node.labels.camera == cam3` |
+| `camera-cam1` | `camera/114_cam1` | RPICAM1 (192.168.1.114) | `node.labels.camera == cam1` |
+| `camera-cam2` | `camera/113_cam2` | RPICAM2 (192.168.1.113) | `node.labels.camera == cam2` |
+| `camera-cam3` | `camera/94_cam3` | RPICAM3 (192.168.1.94) | `node.labels.camera == cam3` |
+| `camera-cam4` | `camera/95_cam4` | RPICAM4 (192.168.1.95) | `node.labels.camera == cam4` |
 
-Device ids, names and calibration files come from `deploy/.env` (`CAMERA_FRONT_DEVICE_ID`, `CAMERA_FRONT_NAME`, `CAMERA_FRONT_CALIBRATION_PATH`, …). The calibration is read on the Pi and sent to camera-processor in the camera's config message. The containers (image `camera-edge:latest`) mount `/run/camera-hw` and `/opt/camera-sensor-fusion/data` from the Pi; with remote processing nothing is written to the data folder (run folders are on the AMS).
+Device ids, names and calibration files come from `deploy/.env` (`CAMERA_CAM1_DEVICE_ID`, `CAMERA_CAM1_NAME`, `CAMERA_CAM1_CALIBRATION_PATH`, …). Each `CAMERA_CAM<N>_DEVICE_ID` is the last octet of that Pi's IP (RPICAM1 at .114 → `114`); nothing derives it automatically, so change it if a Pi's IP changes. The calibration is read on the Pi and sent to camera-processor in the camera's config message. The containers (image `camera-edge:latest`) mount `/run/camera-hw` and `/opt/camera-sensor-fusion/data` from the Pi; with remote processing nothing is written to the data folder (run folders are on the AMS).
 
 With `CAMERA_PLC_TRIGGER=true`, a camera waits for the [PLC](/hardware/plc)'s `Data_Start` pulse before sending and stops on `Db_Stop` (or after `CAMERA_PLC_MAX_RUN_S`). `fastapi-app` sets this on every deploy, the same as the IMUs': off while monitoring, on for a session unless the Run Parameters panel or `IMU_PLC_TRIGGER_ON_RECORD` says otherwise. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 

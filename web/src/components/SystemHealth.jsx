@@ -49,7 +49,7 @@ export function HealthStrip({ health, apiError, lastContact, loading, expanded, 
         summary = "API unreachable";
         summaryClass = "text-red-700";
     } else if (problems.length > 0) {
-        summary = `Degraded — ${problems.join(", ")} down`;
+        summary = `${problems.join(", ")} down`;
         summaryClass = "text-red-700";
     } else if (health?.overall === "ok") {
         summary = "All systems OK";

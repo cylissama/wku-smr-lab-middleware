@@ -354,14 +354,14 @@ services:
 
   # --- Camera edge nodes (pinned by node.labels.camera) ---
 
-  camera-front:
+  camera-cam1:
     image: camera-edge:latest
 
     environment:
       MQTT_BROKER_IP: ${MQTT_BROKER_IP}
-      DEVICE_ID: "${CAMERA_FRONT_DEVICE_ID}"
-      CAMERA_NAME: ${CAMERA_FRONT_NAME}
-      CAMERA_CALIBRATION_PATH: ${CAMERA_FRONT_CALIBRATION_PATH}
+      DEVICE_ID: "${CAMERA_CAM1_DEVICE_ID}"
+      CAMERA_NAME: ${CAMERA_CAM1_NAME}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_CAM1_CALIBRATION_PATH}
       CAMERA_MARKER_LENGTH_M: "${CAMERA_MARKER_LENGTH_M}"
       CAMERA_MARKER_LENGTHS_M: "${CAMERA_MARKER_LENGTHS_M}"
       CAMERA_EDGE_HEALTH_PATH: /tmp/camera-edge-health.json
@@ -390,18 +390,18 @@ services:
     deploy:
       replicas: 1
       labels:
-        smr.description: "Front camera. camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_front. When recording it waits for the PLC's Data_Start."
+        smr.description: "Camera 1 (RPICAM1). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam1. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
-        # camera/113_front), and that's also its device label in the DB
-        smr.device: "${CAMERA_FRONT_DEVICE_ID}_${CAMERA_FRONT_NAME}"
+        # camera/113_cam1), and that's also its device label in the DB
+        smr.device: "${CAMERA_CAM1_DEVICE_ID}_${CAMERA_CAM1_NAME}"
 
       restart_policy:
         condition: any
 
       placement:
         constraints:
-          - node.labels.camera == front
+          - node.labels.camera == cam1
 
     volumes:
       - type: bind
@@ -421,14 +421,14 @@ services:
       start_interval: 1s
 
 
-  camera-side:
+  camera-cam2:
     image: camera-edge:latest
 
     environment:
       MQTT_BROKER_IP: ${MQTT_BROKER_IP}
-      DEVICE_ID: "${CAMERA_SIDE_DEVICE_ID}"
-      CAMERA_NAME: ${CAMERA_SIDE_NAME}
-      CAMERA_CALIBRATION_PATH: ${CAMERA_SIDE_CALIBRATION_PATH}
+      DEVICE_ID: "${CAMERA_CAM2_DEVICE_ID}"
+      CAMERA_NAME: ${CAMERA_CAM2_NAME}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_CAM2_CALIBRATION_PATH}
       CAMERA_MARKER_LENGTH_M: "${CAMERA_MARKER_LENGTH_M}"
       CAMERA_MARKER_LENGTHS_M: "${CAMERA_MARKER_LENGTHS_M}"
       CAMERA_EDGE_HEALTH_PATH: /tmp/camera-edge-health.json
@@ -455,18 +455,18 @@ services:
     deploy:
       replicas: 1
       labels:
-        smr.description: "Side camera. camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_side. When recording it waits for the PLC's Data_Start."
+        smr.description: "Camera 2 (RPICAM2). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam2. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
-        # camera/113_front), and that's also its device label in the DB
-        smr.device: "${CAMERA_SIDE_DEVICE_ID}_${CAMERA_SIDE_NAME}"
+        # camera/113_cam1), and that's also its device label in the DB
+        smr.device: "${CAMERA_CAM2_DEVICE_ID}_${CAMERA_CAM2_NAME}"
 
       restart_policy:
         condition: any
 
       placement:
         constraints:
-          - node.labels.camera == side
+          - node.labels.camera == cam2
 
     volumes:
       - type: bind
@@ -520,10 +520,10 @@ services:
     deploy:
       replicas: 1
       labels:
-        smr.description: "Third camera (RPICAM3). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam3. When recording it waits for the PLC's Data_Start."
+        smr.description: "Camera 3 (RPICAM3). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam3. When recording it waits for the PLC's Data_Start."
         smr.category: camera
         # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
-        # camera/113_front), and that's also its device label in the DB
+        # camera/113_cam1), and that's also its device label in the DB
         smr.device: "${CAMERA_CAM3_DEVICE_ID}_${CAMERA_CAM3_NAME}"
 
       restart_policy:
@@ -532,6 +532,71 @@ services:
       placement:
         constraints:
           - node.labels.camera == cam3
+
+    volumes:
+      - type: bind
+        source: /run/camera-hw
+        target: /run/camera-hw
+
+      - type: bind
+        source: /opt/camera-sensor-fusion/data
+        target: /app/data
+
+    healthcheck:
+      test: [CMD, python3, -m, camera_edge, healthcheck]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+
+
+  camera-cam4:
+    image: camera-edge:latest
+
+    environment:
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP}
+      DEVICE_ID: "${CAMERA_CAM4_DEVICE_ID}"
+      CAMERA_NAME: ${CAMERA_CAM4_NAME}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_CAM4_CALIBRATION_PATH}
+      CAMERA_MARKER_LENGTH_M: "${CAMERA_MARKER_LENGTH_M}"
+      CAMERA_MARKER_LENGTHS_M: "${CAMERA_MARKER_LENGTHS_M}"
+      CAMERA_EDGE_HEALTH_PATH: /tmp/camera-edge-health.json
+      CAMERA_PLC_TRIGGER: ${CAMERA_PLC_TRIGGER:-false}
+      CAMERA_PLC_PATH: ${CAMERA_PLC_PATH:-192.168.1.103}
+      CAMERA_PLC_TAG_START: ${CAMERA_PLC_TAG_START:-Data_Start}
+      CAMERA_PLC_TAG_STOP: ${CAMERA_PLC_TAG_STOP:-Db_Stop}
+      CAMERA_PLC_POLL_S: ${CAMERA_PLC_POLL_S:-0.05}
+      CAMERA_PLC_MAX_RUN_S: ${CAMERA_PLC_MAX_RUN_S:-600}
+      CAMERA_PLC_FAKE: ${CAMERA_PLC_FAKE:-false}
+      # remote: forward each JPEG to camera-processor on the AMS
+      # (camera_frames/<device>/frame), which does the detection; local: detect
+      # on the Pi as before. Needs a camera-edge image with frame_forwarder.py;
+      # an older image ignores these and keeps processing locally.
+      CAMERA_PROCESSING: ${CAMERA_PROCESSING:-remote}
+      CAMERA_FRAME_BROKER_IP: "${CAMERA_FRAME_BROKER_IP:-}"
+      CAMERA_FRAME_TOPIC_PREFIX: ${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
+      # Whether camera_edge keeps raw / annotated frames on the Pi's SD card
+      # (local processing only; remote mode saves nothing on the Pi). Dashboard
+      # run parameters; CAMERA_EDGE_ so they can't be mixed up with
+      # camera-processor's CAMERA_SAVE_* in the repo-root .env.
+      CAMERA_SAVE_FRAMES: ${CAMERA_EDGE_SAVE_FRAMES:-true}
+      CAMERA_SAVE_ANNOTATED: ${CAMERA_EDGE_SAVE_ANNOTATED:-true}
+    deploy:
+      replicas: 1
+      labels:
+        smr.description: "Camera 4 (RPICAM4). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam4. When recording it waits for the PLC's Data_Start."
+        smr.category: camera
+        # The camera publishes to camera/<DEVICE_ID>_<CAMERA_NAME> (e.g.
+        # camera/113_cam1), and that's also its device label in the DB
+        smr.device: "${CAMERA_CAM4_DEVICE_ID}_${CAMERA_CAM4_NAME}"
+
+      restart_policy:
+        condition: any
+
+      placement:
+        constraints:
+          - node.labels.camera == cam4
 
     volumes:
       - type: bind
