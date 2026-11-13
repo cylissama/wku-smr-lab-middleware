@@ -19,6 +19,11 @@ PARAMS: dict[str, dict[str, Any]] = {
         "label": "Wait for PLC start", "group": "plc", "type": "bool", "edge": False,
         "help": "When recording, the IMUs and cameras start sending on the PLC's Data_Start. Monitoring never waits.",
     },
+    "KEEP_EDGE_RUNNING": {
+        "label": "Keep edge running", "group": "plc", "type": "bool", "edge": False,
+        "help": "When the PLC's Db_Stop ends a session, the IMUs and cameras stay up waiting for the next "
+                "Data_Start, so the next session starts without a redeploy. A manual Stop still takes them down.",
+    },
     "IMU_PLC_MAX_RUN_S": {
         "label": "Max PLC run", "group": "imu", "type": "int", "min": 30, "max": 3600, "unit": "s",
         "edge": True, "help": "IMUs stop sending if Db_Stop hasn't come by then",

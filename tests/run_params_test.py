@@ -210,6 +210,24 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["redeployed"])
         self.assertEqual(self.deploys, [])
 
+    async def test_put_in_edge_standby_redeploys_with_the_record_env(self):
+        # Stacks kept up after a session stay armed for the next one
+        m.capture.set(CaptureMode.MONITOR, devices=None)
+        m.deployed_env = {"IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}
+
+        with patch.object(m, "edge_standby", True):
+            result = await m.put_parameters(m.RunParamsUpdate(values={"IMU_SAMPLE_HZ": 50}))
+            skipped = await m.put_parameters(m.RunParamsUpdate(values={"KEEP_EDGE_RUNNING": True}))
+
+        self.assertTrue(result["redeployed"])
+        self.assertEqual(self.deploys, [{"env": {"IMU_SAMPLE_HZ": "50", "IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}}])
+        self.assertFalse(skipped["redeployed"])
+
+    async def test_keep_edge_running_defaults_off_and_is_stored_with_the_session(self):
+        params = {p["key"]: p for p in (await m.get_parameters())["data"]}
+        self.assertIs(params["KEEP_EDGE_RUNNING"]["default"], False)
+        self.assertIn("KEEP_EDGE_RUNNING", await m.effective_run_params())
+
     async def test_stack_env_per_mode(self):
         m.run_overrides = {"IMU_SAMPLE_HZ": 200, "IMU_PLC_TRIGGER_ON_RECORD": True}
         self.assertEqual(m.stack_env(CaptureMode.MONITOR), {"IMU_SAMPLE_HZ": "200", "IMU_PLC_TRIGGER": "false", "CAMERA_PLC_TRIGGER": "false"})

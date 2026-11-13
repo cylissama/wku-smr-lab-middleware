@@ -223,6 +223,60 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         self.db.end_session.assert_awaited_once()
         self.remove.assert_awaited_once()
 
+    async def test_keep_edge_running_leaves_the_stacks_up_after_a_plc_stop(self):
+        m.capture.set(CaptureMode.RECORD, session_id=7, devices={"imu/106"})
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
+            result = await m.stop_session_from_plc()
+            capture = await m.get_capture()
+
+        self.assertTrue(result["success"])
+        self.remove.assert_not_awaited()
+        self.db.end_session.assert_awaited_once()
+        await m.backup_task
+        m.try_backup.assert_awaited_once()
+        # Monitored with the recorded selection, armed for the next session
+        self.assertEqual((m.capture.mode, m.capture.devices), (CaptureMode.MONITOR, {"imu/106"}))
+        self.assertTrue(capture["standby"])
+
+    async def test_keep_edge_running_manual_stop_still_tears_down(self):
+        m.capture.set(CaptureMode.RECORD, session_id=8)
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
+            result = await m.stop_session()
+            standby = m.edge_standby
+
+        self.assertTrue(result["success"])
+        self.remove.assert_awaited_once()
+        self.assertEqual(m.capture.mode, CaptureMode.IDLE)
+        self.assertFalse(standby)
+
+    async def test_button_right_after_a_kept_plc_stop_says_already_stopped(self):
+        m.capture.set(CaptureMode.RECORD, session_id=7)
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
+            await m.stop_session_from_plc()
+            result = await m.stop_session()
+
+        self.assertTrue(result["already_stopped"])
+        self.remove.assert_not_awaited()
+        self.db.end_session.assert_awaited_once()
+        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
+
+    async def test_keep_edge_running_db_down_still_keeps_the_stacks(self):
+        m.capture.set(CaptureMode.RECORD, session_id=9)
+        self.db.end_session = AsyncMock(side_effect=ConnectionRefusedError("db down"))
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False), \
+             patch("fast_server.main.pending_session_end", None):
+            result = await m.stop_session_from_plc()
+            standby = m.edge_standby
+
+        self.assertTrue(result["degraded"])
+        self.remove.assert_not_awaited()
+        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
+        self.assertTrue(standby)
+
     async def test_button_stop_still_works_normally(self):
         m.capture.set(CaptureMode.RECORD, session_id=8)
 
