@@ -109,6 +109,8 @@ Otherwise, click **Stop Session**. Either way, the AMS:
 
 Start Session stays greyed out until all of this but the backup is done, so you can start the next run as soon as it's enabled again.
 
+**Running several sessions back to back?** Turn on **Keep edge running** in Run Parameters. After a PLC stop, step 2 is skipped: the devices stay up (the badge shows **Edge standby**) and the next Start Session doesn't redeploy them, so the robot can go right away. A manual Stop still removes them, and **Take Edge Down** removes them when you're done. See [Back-to-back sessions](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running).
+
 ## 8. Review the data
 
 - [pgAdmin](http://192.168.2.100:5050/browser/); new users see [Getting database access](/data/new-student-access)
