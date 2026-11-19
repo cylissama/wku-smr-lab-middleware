@@ -214,9 +214,13 @@ services:
       - CAMERA_FRAME_BROKER_PORT=${CAMERA_FRAME_BROKER_PORT:-}
       - CAMERA_FRAME_TOPIC_PREFIX=${CAMERA_FRAME_TOPIC_PREFIX:-camera_frames}
       - CAMERA_QUEUE_FRAMES=${CAMERA_QUEUE_FRAMES:-60}
+      - CAMERA_WORKERS_PER_CAMERA=${CAMERA_WORKERS_PER_CAMERA:-2}
       - CAMERA_SAVE_FRAMES=${CAMERA_SAVE_FRAMES:-true}
-      - CAMERA_SAVE_ANNOTATED=${CAMERA_SAVE_ANNOTATED:-true}
+      - CAMERA_SAVE_ANNOTATED=${CAMERA_SAVE_ANNOTATED:-false}
       - CAMERA_SAVE_CSV=${CAMERA_SAVE_CSV:-true}
+      # record: write run folders only while fastapi-app records (GET /capture); always: every frame
+      - CAMERA_SAVE_WHEN=${CAMERA_SAVE_WHEN:-record}
+      - CAMERA_CAPTURE_URL=http://fastapi-app:8000/capture
       - CAMERA_DATA_ROOT=/data
     volumes:
       # Local volume: frames are written at camera rate, too much for the soft NFS mounts

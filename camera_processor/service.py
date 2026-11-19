@@ -10,6 +10,8 @@
 # One worker thread per camera, each with a bounded queue: if processing falls
 # behind, the oldest queued frame is dropped and counted (never the broker or
 # the Pi backing up). OpenCV releases the GIL, so cameras process in parallel.
+# Rows are published in every capture mode (the dashboard's live view), but run
+# folders are only written while fastapi-app is recording (CAMERA_SAVE_WHEN).
 # Design: plans/camera-offload-plan.md; docs: web/docs/docker/camera-processor.md.
 
 from __future__ import annotations
@@ -38,6 +40,18 @@ def _flag(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _save_when(value: str) -> str:
+    value = (value or "").strip().lower() or "record"
+    if value not in {"record", "always"}:
+        raise ValueError(f"CAMERA_SAVE_WHEN must be 'record' or 'always', not {value!r}")
+    return value
+
+
+# fastapi-app capture modes in which run folders are written (save_when=record).
+# STOPPING too, so the frames still queued when a session stops are kept.
+SAVING_MODES = {"record", "stopping"}
+
+
 @dataclass
 class ProcessorConfig:
     # Where the rows go (the broker fastapi-app subscribes to)
@@ -50,10 +64,21 @@ class ProcessorConfig:
     frame_qos: int = 0
     publish_qos: int = 0
     queue_frames: int = 60
+    # Threads per camera sharing its queue. One 1080p frame takes ~12-25 ms to
+    # decode + detect (more with a busy scene), and a camera at ~38 fps sends
+    # one every 26 ms, so a single thread can't keep up with every camera.
+    workers_per_camera: int = 2
     data_root: str = "/data"
     save_frames: bool = True
     save_annotated: bool = True
     save_csv: bool = True
+    # When run folders are written: "record" = only while fastapi-app's capture
+    # mode is record/stopping (monitoring streams at up to ~100 MB/s for four
+    # cameras, which would fill the disk), "always" = every frame as before.
+    save_when: str = "record"
+    # fastapi-app's GET /capture, polled every capture_poll_s for the mode
+    capture_url: str = "http://fastapi-app:8000/capture"
+    capture_poll_s: float = 1.0
     health_path: str = "/tmp/camera-processor-health.json"
     stale_after_s: int = 30
     stats_interval_s: float = 30.0
@@ -75,10 +100,14 @@ class ProcessorConfig:
             frame_qos=min(1, max(0, int(os.getenv("CAMERA_FRAME_QOS", "0")))),
             publish_qos=min(1, max(0, int(os.getenv("CAMERA_PUBLISH_QOS", "0")))),
             queue_frames=max(1, int(os.getenv("CAMERA_QUEUE_FRAMES", "60"))),
+            workers_per_camera=max(1, min(8, int(os.getenv("CAMERA_WORKERS_PER_CAMERA", "2")))),
             data_root=os.getenv("CAMERA_DATA_ROOT", "/data"),
             save_frames=_flag("CAMERA_SAVE_FRAMES", True),
             save_annotated=_flag("CAMERA_SAVE_ANNOTATED", True),
             save_csv=_flag("CAMERA_SAVE_CSV", True),
+            save_when=_save_when(os.getenv("CAMERA_SAVE_WHEN", "record")),
+            capture_url=os.getenv("CAMERA_CAPTURE_URL", "http://fastapi-app:8000/capture"),
+            capture_poll_s=max(0.2, float(os.getenv("CAMERA_CAPTURE_POLL_S", "1"))),
             health_path=os.getenv("CAMERA_PROCESSOR_HEALTH_PATH", "/tmp/camera-processor-health.json"),
             stale_after_s=max(5, int(os.getenv("CAMERA_PROCESSOR_STALE_AFTER_S", "30"))),
             stats_interval_s=max(5.0, float(os.getenv("CAMERA_PROCESSOR_STATS_INTERVAL_S", "30"))),
@@ -101,7 +130,12 @@ class DeviceStats:
 
 
 class DeviceWorker:
-    """Processes one camera's frames in order on its own thread."""
+    """Processes one camera's frames on workers_per_camera threads sharing one queue.
+
+    With more than one thread, frames finish slightly out of order (rows and
+    detections.csv lines by a frame or two); each row carries its frame index
+    and capture time, so consumers order by those, not arrival.
+    """
 
     def __init__(self, label: str, processor: "CameraProcessor"):
         self.label = label
@@ -112,22 +146,42 @@ class DeviceWorker:
         self.config_message: dict | None = None
         self._queue: "queue.Queue[tuple[dict, bytes]]" = queue.Queue(maxsize=self.cfg.queue_frames)
         self._folder: RunFolder | None = None
+        self._lock = threading.Lock()  # run folder + stats, shared by the threads
+        self._local = threading.local()  # each thread's own pipeline copy
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name=f"camera-{label}", daemon=True)
+        self._threads = [
+            threading.Thread(target=self._run, name=f"camera-{label}-{i}", daemon=True)
+            for i in range(max(1, self.cfg.workers_per_camera))
+        ]
 
     def start(self) -> None:
-        self._thread.start()
+        for thread in self._threads:
+            thread.start()
 
     def stop(self, timeout: float = 10.0) -> None:
         self._stop.set()
-        if self._thread.is_alive():
-            self._thread.join(timeout=timeout)
-        self._close_folder()
+        for thread in self._threads:
+            if thread.is_alive():
+                thread.join(timeout=timeout)
+        with self._lock:
+            self._close_folder()
 
     def configure(self, config: dict) -> None:
-        # Swapped as one reference, so the worker thread sees old or new, never a mix.
+        # Swapped as one reference, so a thread sees old or new, never a mix.
         self.pipeline = CameraPipeline(config)
         self.config_message = config
+
+    def _thread_pipeline(self) -> CameraPipeline | None:
+        # A copy per thread, so no OpenCV detector object is shared between
+        # threads; rebuilt when a new config message replaces self.pipeline.
+        shared = self.pipeline
+        if shared is None:
+            return None
+        local = self._local
+        if getattr(local, "source", None) is not shared:
+            local.source = shared
+            local.pipeline = CameraPipeline(self.config_message) if len(self._threads) > 1 else shared
+        return local.pipeline
 
     def submit(self, header: dict, jpeg: bytes) -> None:
         self.stats.received += 1
@@ -149,9 +203,10 @@ class DeviceWorker:
             except queue.Empty:
                 continue
             try:
-                self.process(header, jpeg)
+                self.process(header, jpeg, self._thread_pipeline())
             except Exception:
-                self.stats.bad_frames += 1
+                with self._lock:
+                    self.stats.bad_frames += 1
                 log.exception("camera %s: failed to process frame %s", self.label, header.get("frame_idx"))
 
     def _close_folder(self) -> None:
@@ -161,6 +216,9 @@ class DeviceWorker:
 
     def _folder_for(self, pipeline: CameraPipeline, run_id: str) -> RunFolder | None:
         if not (self.cfg.save_frames or self.cfg.save_annotated or self.cfg.save_csv):
+            return None
+        if not self.processor.saving():
+            self._close_folder()  # a recording ended: finish its folder
             return None
         if self._folder is None or self._folder.run_id != run_id:
             self._close_folder()
@@ -174,42 +232,45 @@ class DeviceWorker:
                      extra={"category": "ingest"})
         return self._folder
 
-    def process(self, header: dict, jpeg: bytes) -> list[str]:
+    def process(self, header: dict, jpeg: bytes, pipeline: CameraPipeline | None = None) -> list[str]:
         """Process one frame; returns the CSV lines published."""
-        pipeline = self.pipeline
+        pipeline = pipeline or self.pipeline
         if pipeline is None:
             return []
         frame_idx = int(header["frame_idx"])
         run_id = str(header["run_id"])
-        if run_id != self.stats.run_id:
-            self.stats.run_id = run_id
 
         image = pipeline.decode(jpeg)
         if image is None:
-            self.stats.bad_frames += 1
+            with self._lock:
+                self.stats.bad_frames += 1
             return []
 
-        folder = self._folder_for(pipeline, run_id)
+        with self._lock:
+            if run_id != self.stats.run_id:
+                self.stats.run_id = run_id
+            folder = self._folder_for(pipeline, run_id)
         image_path = folder.write_frame(frame_idx, jpeg) if folder else None
         result = pipeline.process(image, frame_idx, header.get("capture_time_ms"), image_path)
-        if result.detections:
-            self.stats.frames_with_markers += 1
-            if folder and folder.save_annotated:
-                folder.write_annotated(frame_idx, pipeline.annotate(image, frame_idx, result))
+        if result.detections and folder and folder.save_annotated:
+            folder.write_annotated(frame_idx, pipeline.annotate(image, frame_idx, result))
 
         lines = [row_to_csv_line(row) for row in result.rows]
         for line in lines:
             self.processor.publish(pipeline.output_topic, line)
-        if folder:
-            folder.write_rows(result.rows)
 
         now = time.time()
-        self.stats.processed += 1
-        self.stats.rows += len(lines)
-        self.stats.last_frame_at = now
-        sent_at = header.get("sent_at_ms")
-        if sent_at:
-            self.stats.last_latency_ms = round(now * 1000 - float(sent_at), 1)
+        with self._lock:
+            if folder:
+                folder.write_rows(result.rows)
+            if result.detections:
+                self.stats.frames_with_markers += 1
+            self.stats.processed += 1
+            self.stats.rows += len(lines)
+            self.stats.last_frame_at = now
+            sent_at = header.get("sent_at_ms")
+            if sent_at:
+                self.stats.last_latency_ms = round(now * 1000 - float(sent_at), 1)
         return lines
 
 
@@ -223,6 +284,23 @@ class CameraProcessor:
         self.frame_connected = False
         self.output_connected = False
         self.started_at = time.time()
+        # fastapi-app's capture mode from the last successful poll; None until
+        # the first one. Unreachable keeps the last known mode (a recording
+        # survives a fastapi-app restart); never reached means not saving.
+        self.capture_mode: str | None = None
+
+    def saving(self) -> bool:
+        return self.cfg.save_when == "always" or self.capture_mode in SAVING_MODES
+
+    def set_capture_mode(self, mode: str | None) -> None:
+        if mode == self.capture_mode:
+            return
+        was_saving = self.saving()
+        self.capture_mode = mode
+        if self.saving() != was_saving:
+            log.info("capture mode %s: %s run folders", mode,
+                     "writing" if self.saving() else "not writing",
+                     extra={"category": "ingest", "important": True})
 
     # --- message handling (called on the MQTT network thread) ---
 
@@ -290,6 +368,7 @@ class CameraProcessor:
         for label, worker in list(self.workers.items()):
             stats = asdict(worker.stats)
             stats["queued"] = worker._queue.qsize()
+            stats["threads"] = len(worker._threads)
             stats["configured"] = worker.pipeline is not None
             stats["last_frame_age_s"] = (
                 None if worker.stats.last_frame_at is None else round(now - worker.stats.last_frame_at, 1)
@@ -303,6 +382,9 @@ class CameraProcessor:
             "frame_broker_connected": self.frame_connected,
             "output_broker": f"{self.cfg.mqtt_host}:{self.cfg.mqtt_port}",
             "output_broker_connected": self.output_connected,
+            "save_when": self.cfg.save_when,
+            "capture_mode": self.capture_mode,
+            "saving": self.saving(),
             "devices": devices,
         }
 
@@ -336,6 +418,33 @@ def _mqtt_client(client_id: str):
 def _rc_ok(rc) -> bool:
     # paho 2 passes a ReasonCode, paho 1 an int
     return (not rc.is_failure) if hasattr(rc, "is_failure") else rc == 0
+
+
+def fetch_capture_mode(url: str, timeout: float = 2.0) -> str:
+    """fastapi-app's capture mode ("idle", "monitor", "record", "stopping")."""
+    import urllib.request
+
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return str(json.load(resp)["mode"])
+
+
+def capture_poll_loop(processor: CameraProcessor, stop: threading.Event, fetch=fetch_capture_mode) -> None:
+    cfg = processor.cfg
+    failures = 0
+    while True:
+        try:
+            processor.set_capture_mode(fetch(cfg.capture_url))
+            failures = 0
+        except Exception as error:
+            failures += 1
+            # fastapi-app is often still starting when this does; warn once it's been a while
+            if failures == 10:
+                log.warning("can't read the capture mode from %s (%s); keeping %s, %s run folders",
+                            cfg.capture_url, error, processor.capture_mode,
+                            "writing" if processor.saving() else "not writing",
+                            extra={"category": "health", "important": True})
+        if stop.wait(cfg.capture_poll_s):
+            return
 
 
 def run(cfg: ProcessorConfig | None = None) -> None:
@@ -396,14 +505,19 @@ def run(cfg: ProcessorConfig | None = None) -> None:
         out_client.connect_async(cfg.mqtt_host, cfg.mqtt_port, keepalive=30)
         out_client.loop_start()
 
+    if cfg.save_when == "record":
+        threading.Thread(target=capture_poll_loop, args=(processor, stop),
+                         name="capture-poll", daemon=True).start()
     frame_client.connect_async(cfg.frame_host, cfg.frame_port, keepalive=30)
     frame_client.loop_start()
     log.info(
         "camera-processor starting: frames from %s:%s (%s), rows to %s:%s, data in %s "
-        "(frames=%s annotated=%s csv=%s), queue %d frames per camera",
+        "(frames=%s annotated=%s csv=%s, %s), queue %d frames and %d threads per camera",
         cfg.frame_host, cfg.frame_port, protocol.subscription(cfg.topic_prefix),
         cfg.mqtt_host, cfg.mqtt_port, cfg.data_root,
-        cfg.save_frames, cfg.save_annotated, cfg.save_csv, cfg.queue_frames,
+        cfg.save_frames, cfg.save_annotated, cfg.save_csv,
+        "always" if cfg.save_when == "always" else f"only while recording, mode from {cfg.capture_url}",
+        cfg.queue_frames, cfg.workers_per_camera,
         extra={"category": "system", "important": True},
     )
 
