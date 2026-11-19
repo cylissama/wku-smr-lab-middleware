@@ -239,6 +239,52 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((m.capture.mode, m.capture.devices), (CaptureMode.MONITOR, {"imu/106"}))
         self.assertTrue(capture["standby"])
 
+    # The whole back-to-back flow, as the dashboard drives it: Start, robot run,
+    # Db_Stop (edge kept up), Start again in standby -> a new session id on the
+    # same stacks, and the next run's data is queued under it
+    async def test_keep_edge_running_start_in_standby_opens_a_new_session(self):
+        from tests.capture_test import IMU_PAYLOAD, drain
+        stack = AsyncMock(return_value={"success": True})
+        self.db.current_session_id = None
+        ids = iter([563, 564])
+
+        async def fake_create(**kw):
+            self.db.current_session_id = next(ids)
+            return self.db.current_session_id
+
+        async def fake_end():
+            self.db.current_session_id = None
+
+        self.db.create_session = AsyncMock(side_effect=fake_create)
+        self.db.end_session = AsyncMock(side_effect=fake_end)
+
+        drain(m.imu_queue)
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False), \
+             patch.object(m, "call_stack_controller", stack), \
+             patch.object(m, "resolve_selection", AsyncMock(return_value=(None, None))), \
+             patch.object(m, "run_param_defaults", AsyncMock(return_value={})), \
+             patch.object(m, "deployed_env", None):
+            first = await m.start_session("Full_System_a", session_label="Full System", is_test_session=False)
+            deploys_after_first = stack.await_count
+
+            await m.stop_session_from_plc()                       # robot finished
+            standby, status = (await m.get_capture())["standby"], await m.get_running_session()
+
+            await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)   # run in standby: not stored
+            in_standby = drain(m.imu_queue)
+
+            second = await m.start_session("Full_System_b", session_label="Full System", is_test_session=False)
+            await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)   # next run
+            queued = drain(m.imu_queue)
+
+        self.assertEqual((first["id"], second["id"]), (563, 564))
+        self.assertTrue(standby)
+        self.assertFalse(status["data"])            # dashboard: no active session, Start enabled
+        self.assertEqual(in_standby, [])
+        self.assertEqual(stack.await_count, deploys_after_first)   # no remove, no redeploy
+        self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 564))
+        self.assertEqual([q["session_id"] for q in queued], [564])
+
     async def test_keep_edge_running_manual_stop_still_tears_down(self):
         m.capture.set(CaptureMode.RECORD, session_id=8)
 
