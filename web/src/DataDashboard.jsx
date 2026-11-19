@@ -137,8 +137,6 @@ function getSessionDisplayValue(session) {
 export default function DataDashboard() {
     const [activeSession, setActiveSession] = useState(false);
     const [latestSession, setLatestSession] = useState("");
-    // GET /capture's session_id: changes when a session starts without a click
-    const [captureSessionId, setCaptureSessionId] = useState(null);
     const [isTestSession, setIsTestSession] = useState(true);
     const [isStopping, setIsStopping] = useState(false);
     const [isStatusLoading, setIsStatusLoading] = useState(true);
@@ -248,7 +246,6 @@ export default function DataDashboard() {
                 setCaptureBusy(Boolean(capture.busy));
                 setCaptureEdge(capture.edge ?? null);
                 setCaptureStandby(Boolean(capture.standby));
-                setCaptureSessionId(capture.session_id ?? null);
             } catch (e) {
                 // An unreachable API is already shown by the System Health strip
                 if (!(e instanceof TypeError)) {
@@ -262,8 +259,7 @@ export default function DataDashboard() {
     }, []);
 
     // (Re)loaded whenever the database (re)connects -- with it down there's
-    // nothing to load, and the page must not wait on it -- and when the
-    // recording session changes (e.g. started after a PLC stop with Keep edge running)
+    // nothing to load, and the page must not wait on it
     useEffect(() => {
         if (!dbUp) {
             setIsLatestSessionLoading(false);
@@ -294,7 +290,7 @@ export default function DataDashboard() {
         };
 
         getLatestSession();
-    }, [dbUp, captureSessionId]);
+    }, [dbUp]);
 
     // Refresh device states every 3 s while monitoring/recording (so "receiving"
     // shows up quickly), every 10 s when idle
