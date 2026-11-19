@@ -45,7 +45,7 @@ There are three separate questions, answered in three different places:
    │  runs:  docker stack deploy --resolve-image never --prune -c /tmp/stack-XXXX.yml edge
    │         (Docker CLI inside the container → host's /var/run/docker.sock)
    ▼
- Docker daemon on the AMS host  =  Swarm manager (IIoT, 192.168.2.100)
+ Docker daemon on the AMS host  =  Swarm manager (AMS, 192.168.2.100)
    │  creates/updates services edge_imu-106, edge_camera-cam1
    │  removes the rest of the stack's services (--prune)
    │  schedules each task onto its Pi using placement constraints
@@ -96,7 +96,7 @@ Each service in `deploy/swarm-edge-nodes.yml` carries two Swarm **service labels
       replicas: 1
       labels:
         smr.category: camera
-        smr.device: "${CAMERA_CAM1_DEVICE_ID}"
+        smr.device: "${CAMERA_CAM1_DEVICE_ID}_${CAMERA_CAM1_NAME}"
 ```
 
 `smr.device` uses the **same variable** the service already uses for its MQTT topic, so the two can't drift apart. Because they're real Swarm labels, they also show up on the running service:
@@ -165,7 +165,7 @@ Content-Type: application/json
 ```
 
 ```http
-GET /session/start/Full_System_2026-10-08T17%3A00%3A00.000Z?is_test_session=true&session_label=Full%20System&devices=imu%2F106&devices=camera%2F113&devices=robot%2Fmain
+GET /session/start/Full_System_2026-10-08T17%3A00%3A00.000Z?is_test_session=true&session_label=Full%20System&devices=imu%2F106&devices=camera%2F114_cam1&devices=robot%2Fmain
 ```
 
 `/session/start` stays a `GET` for backward compatibility, so the selection is a **repeated query parameter**; the `/` inside each key is URL-encoded as `%2F`. Omitting `devices` entirely means "every device", so older clients keep working unchanged.
@@ -194,7 +194,7 @@ Then, in order:
 1. Resolve and validate the selection.
 2. `db.create_session(..., devices=filter)` — the selection is saved in `session.devices` (JSONB; `NULL` = every device).
 3. `set_capture(RECORD, session_id, devices=filter)` — the gate opens *before* devices start, so their first messages are stored.
-4. Deploy with `stack_env(RECORD)`. This is **skipped** only if we were already monitoring with the same selection **and** the stacks were deployed with the same settings (`deployed_env`). By default the settings differ (the IMUs' PLC trigger is off while monitoring and on for a session), so starting from Monitor redeploys, which restarts only the IMU services.
+4. Deploy with `stack_env(RECORD)`. This is **skipped** only if we were already monitoring with the same selection **and** the stacks were deployed with the same settings (`deployed_env`). By default the settings differ (the IMUs' PLC trigger is off while monitoring and on for a session), so starting from Monitor redeploys, which restarts the IMU and camera services. After a PLC stop with [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running) the stacks already run with the recording settings, so the next start with the same selection skips it.
 5. If a deploy fails → the gate closes and the session is ended (rolled back).
 
 **`deploy_managed_stacks(plan)`** makes one call per managed stack, in parallel:
@@ -246,7 +246,8 @@ stacks:
     stack_name: edge
     deploy_flags: ["--resolve-image", "never"]
     env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S,
-                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH]
+                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH,
+                    CAMERA_EDGE_SAVE_FRAMES, CAMERA_EDGE_SAVE_ANNOTATED]
 ```
 
 The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name` is the Swarm stack namespace (services become `edge_<service>`). `--resolve-image never` makes Swarm use the image tags already present on each Pi instead of contacting a registry. `env_overrides` lists the only variables a deploy request may set in its `env`; anything else gets `400`. This keeps `fastapi-app` from changing hostnames, broker addresses or other infrastructure values. The file is re-read on every request — but it's a single-file bind mount, so if an editor *replaces* the file instead of editing it in place, the container keeps seeing the old copy until `stack-controller` is restarted.
@@ -289,7 +290,7 @@ A deploy with **no body** is the same minus steps 1, 3 and 5: the original `/sta
 
 ### Removing
 
-`POST /stacks/edge/remove` runs `docker stack rm edge` (60 s timeout). That returns as soon as Swarm deletes the services, but the containers on the Pis take a few more seconds to stop (about 4 s on the lab Pis). So the remove then polls the stack's tasks (`docker_ops.live_tasks()`, every 0.5 s) until none is still up on a Ready node, for at most `REMOVE_WAIT_S` (30 s). Tasks on a node that's down are skipped, since they can't be waited for. The reply says `teardown_confirmed: true`, or `false` with `still_running` listing `task@node` if it gave up or couldn't ask Docker; the stack is removed either way, and `fastapi-app` shows a warning. While this runs, `GET /status` says `removing`. `stop_session` and `/listen/stop` call this, then `stop_session` waits for the ingestion queues to drain.
+`POST /stacks/edge/remove` runs `docker stack rm edge` (60 s timeout). That returns as soon as Swarm deletes the services, but the containers on the Pis take a few more seconds to stop (about 4 s on the lab Pis). So the remove then polls the stack's tasks (`docker_ops.live_tasks()`, every 0.5 s) until none is still up on a Ready node, for at most `REMOVE_WAIT_S` (30 s). Tasks on a node that's down are skipped, since they can't be waited for. The reply says `teardown_confirmed: true`, or `false` with `still_running` listing `task@node` if it gave up or couldn't ask Docker; the stack is removed either way, and `fastapi-app` shows a warning. While this runs, `GET /status` says `removing`. `stop_session` and `/listen/stop` call this, then `stop_session` waits for the ingestion queues to drain. A PLC stop with *Keep edge running* on skips it and leaves the stacks up ([Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running)).
 
 ### Status
 

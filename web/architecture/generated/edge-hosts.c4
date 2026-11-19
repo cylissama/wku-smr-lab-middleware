@@ -87,10 +87,10 @@ deployment {
     }
 
     host camera-cam4-pi 'Pi with label camera=cam4' {
-      technology 'edge_camera-cam4, device camera/95_cam4'
+      technology 'edge_camera-cam4, device camera/60_cam4'
       description 'Placement: node.labels.camera == cam4'
       camera-cam4 = instanceOf edge.cameraNode {
-        title 'camera-cam4 (camera/95_cam4)'
+        title 'camera-cam4 (camera/60_cam4)'
         description 'Camera 4 (RPICAM4). camera_edge takes frames from camera_host and forwards each JPEG to camera-processor on the AMS, which publishes the marker poses to camera/<device id>_cam4. When recording it waits for the PLC\'s Data_Start.'
       }
     }

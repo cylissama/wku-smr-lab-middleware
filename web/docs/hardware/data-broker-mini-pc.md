@@ -4,7 +4,7 @@ The mini PC is the home of the Active Middleware Services: every container in `d
 
 | | |
 | --- | --- |
-| Hostname | `IIoT` |
+| Hostname | `AMS` (also its Swarm node name) |
 | Address | 192.168.2.100 |
 | SSH | `ssh data-team@192.168.2.100` (password in the lab's password manager) |
 | Repository | `/home/ubuntu/wku-smr-lab-middleware`; the running containers are built from this checkout |

@@ -18,7 +18,7 @@ The **Run Parameters** panel on the dashboard sets per-run values for the edge d
 - **Values stay set between runs** until someone changes or resets them. Before a session starts, the Start Session confirmation lists every changed parameter.
 - **Edit, then Apply.** Nothing is sent until you click Apply. Out-of-range values are refused and the tile says why.
 - **Idle:** the values apply on the next Start Monitoring or Start Session.
-- **Monitoring:** Apply redeploys the edge stack right away, which restarts the devices whose settings changed. Watch the IMU rate on the Devices box to check the change. *Wait for PLC start* only affects recording, so changing it doesn't restart anything.
+- **Monitoring:** Apply redeploys the edge stack right away, which restarts the devices whose settings changed. Watch the IMU rate on the Devices box to check the change. *Wait for PLC start* and *Keep edge running* only affect recording, so changing them doesn't restart anything. In Edge standby, Apply redeploys with the recording settings, so the devices stay armed for the next session.
 - **Recording / stopping:** the panel is locked and shows the values the session is running with.
 - **Every session records its values** in `session.parameters` (JSONB), defaults included:
 

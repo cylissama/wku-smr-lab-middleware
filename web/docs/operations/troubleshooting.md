@@ -61,7 +61,7 @@ In the **Devices** box a device stays grey or red while monitoring or recording,
 2. If it's `running` but not receiving, check the Pi itself: is it on, and can it reach the broker at `192.168.2.100:1883`? Logs: `docker service logs edge_imu-106` (or the device's service name) on the AMS host.
 3. Robot: the robot connects to the AMS on port 5001, not through Swarm. See [Robot TCP server down](#robot-tcp-server-down).
 
-## No IMU data after Start Session
+## No IMU or camera data after Start Session
 
 IMU or camera data arrived while monitoring but stops once the session starts. This is usually expected: when recording, the IMUs and cameras wait for the PLC's `Data_Start` before streaming, so data begins when the robot program starts, not when you click Start Session. If it never starts, check the PLC and the trigger settings: [PLC trigger](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 

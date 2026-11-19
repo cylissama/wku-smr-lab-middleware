@@ -8,11 +8,11 @@ Most routes answer `200` with `{"success": true, …}` or `{"success": false, "e
 
 | Method & path | What it does | Needs DB |
 | --- | --- | --- |
-| `GET /capture` | Current [capture mode](/overview/capture-modes), session id and device selection, plus `busy` (a start/stop/redeploy is in progress) and `edge` ([edge readiness](/overview/capture-modes#edge-readiness)) | no |
+| `GET /capture` | Current [capture mode](/overview/capture-modes), session id and device selection, plus `busy` (a start/stop/redeploy is in progress), `edge` ([edge readiness](/overview/capture-modes#edge-readiness)) and `standby` (monitoring because the stacks were kept up after a PLC stop, see [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running)) | no |
 | `POST /listen/start` | Start monitor mode. Body `{"devices": [...]}` or `null` for all. Only from idle. | no |
-| `POST /listen/stop` | Stop monitor mode and remove the edge stack | no |
+| `POST /listen/stop` | Stop monitor mode (or Edge standby) and remove the edge stack | no |
 | `GET /session/start/{label}?session_label=…&is_test_session=…&devices=…` | Start a recording session. `devices` is repeated per key; leave it out for all devices. | yes |
-| `GET /session/stop` | Stop the session: drain, end, back up. Works with the DB down. | no |
+| `GET /session/stop` | Stop the session: remove the edge stack, drain, end, back up. Works with the DB down. | no |
 | `GET /session` | The open session, if any | yes |
 | `GET /sessions` | All sessions (`id`, `label`) | yes |
 | `GET /session/labels` | Session types for the dropdown | yes |
@@ -23,7 +23,7 @@ Most routes answer `200` with `{"success": true, …}` or `{"success": false, "e
 | --- | --- | --- |
 | `GET /devices` | Device catalog with Swarm state and live activity ([details](/docker/stack-controller#get-devices-fastapi-app)) | no |
 | `GET /parameters` | [Run parameters](/operations/run-parameters): definition, default, value, `editable` | no |
-| `PUT /parameters` | Body `{"values": {"IMU_SAMPLE_HZ": 200, "IMU_PLC_MAX_RUN_S": null}}`; `null` resets to the default. Refused while recording or stopping. | no |
+| `PUT /parameters` | Body `{"values": {"IMU_SAMPLE_HZ": 200, "IMU_PLC_MAX_RUN_S": null}}`; `null` resets to the default. Refused while recording or stopping. While monitoring, redeploys if the edge settings changed (in Edge standby, with the recording settings). | no |
 
 ## Data
 

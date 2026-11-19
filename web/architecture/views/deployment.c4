@@ -21,7 +21,7 @@ deployment {
   }
 
   network amsnet '192.168.2.x' {
-    host iiot 'IIoT (AMS host)' {
+    host iiot 'AMS host (hostname AMS)' {
       technology '192.168.2.100'
       instanceOf ams
     }

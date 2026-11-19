@@ -5,13 +5,13 @@ How the parts of the system reach each other. Every address is in the [IP Addres
 ```text
  192.168.1.x  (robot cell)                         192.168.2.x
  ┌─────────────────────────────────────┐          ┌──────────────────────────┐
- │ FANUC robot       192.168.1.100 ────┼─ TCP ───►│ AMS host "IIoT"          │
+ │ FANUC robot       192.168.1.100 ────┼─ TCP ───►│ AMS host "AMS"           │
  │ Cell PLC (L32E)   192.168.1.103 ◄───┼─ CIP ────│ 192.168.2.100            │
  │ NAS (Postgres)    192.168.1.104 ◄───┼─ SQL/NFS─│  docker-compose stack    │
  │ IMU Pis           192.168.1.106–111 ┼─ MQTT ──►│  + Swarm manager         │
- │ Camera Pis        192.168.1.113–114 ┼─ MQTT ──►│                          │
+ │ Camera Pis  .113, .114, .94, .60    ┼─ MQTT ──►│                          │
  └─────────────────────────────────────┘          └──────────────────────────┘
-        IMU Pis also read the PLC (CIP) directly.
+        IMU and camera Pis also read the PLC (CIP) directly.
 ```
 
 ::: info Placeholder
@@ -24,7 +24,7 @@ TODO: how the subnets are routed (which device routes between 192.168.1.x, 2.x a
 | --- | --- | --- | --- |
 | 80 | TCP | AMS | Dashboard and these docs (`web`); `/api/` proxies to `fastapi-app` |
 | 8000 | TCP | AMS | `fastapi-app` directly ([API](/docker/api)) |
-| 1883 | TCP | AMS | MQTT: IMUs and cameras publish here |
+| 1883 | TCP | AMS | MQTT: IMUs and cameras publish here, and the camera Pis send their frames to camera-processor |
 | 9001 | TCP | AMS | MQTT over WebSocket |
 | 5001 | TCP | AMS | Robot CSV stream (`tcp`) |
 | 123 | UDP | AMS | NTP |
@@ -32,10 +32,10 @@ TODO: how the subnets are routed (which device routes between 192.168.1.x, 2.x a
 | 2377, 7946, 4789 | TCP/UDP | AMS ↔ Pis | Docker Swarm management, gossip and overlay traffic |
 | 5433 | TCP | NAS | PostgreSQL |
 | 2049 | TCP | NAS | NFS (backups, logs) |
-| 44818 | TCP | PLC | EtherNet/IP, read by `fastapi-app` and the IMU Pis |
+| 44818 | TCP | PLC | EtherNet/IP, read by `fastapi-app` and the IMU and camera Pis |
 
 Internal-only ports that stay on the Docker network: `stack-controller` 8080, the `tcp` status server 8090.
 
 ## Names inside the AMS stack
 
-Containers reach each other by Compose service name: `mqtt-broker`, `fastapi-app`, `tcp`, `stack-controller`, `ntp`. nginx in `web` resolves `fastapi-app` per request, so the dashboard loads even while the API is down. Edge devices aren't on the Compose network; they use the host's address (`MQTT_BROKER_IP=192.168.2.100`).
+Containers reach each other by Compose service name: `mqtt-broker`, `fastapi-app`, `tcp`, `camera-processor`, `stack-controller`, `ntp`. nginx in `web` resolves `fastapi-app` per request, so the dashboard loads even while the API is down. Edge devices aren't on the Compose network; they use the host's address (`MQTT_BROKER_IP=192.168.2.100`).

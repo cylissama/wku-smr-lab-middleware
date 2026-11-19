@@ -10,6 +10,7 @@ This repository: every service on the AMS host and their Docker setup.
 
 - `fastapi-app` (FastAPI backend: ingestion, sessions, backups, WebSockets)
 - `tcp` (robot TCP server)
+- `camera-processor` (ArUco detection and pose for the camera Pis' frames)
 - `web` (dashboard and this documentation site)
 - `stack-controller` (Swarm deploy agent, watchdog, logs)
 - MQTT broker, NTP and pgAdmin configuration

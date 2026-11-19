@@ -41,8 +41,8 @@ Starting a run is drawn in [Start Monitoring](/architecture/view/startMonitoring
 
 IMUs and cameras publish MQTT to `192.168.2.100:1883`. The robot (FANUC controller) streams CSV to `192.168.2.100:5001` on its own. PostgreSQL, backups and log files live on the Synology NAS (`192.168.1.104`).
 
-1. **The broker stack** (`docker-compose.yml`) runs all the time on the AMS host: the MQTT broker, `fastapi-app`, the robot TCP server, the web dashboard, NTP, pgAdmin and `stack-controller`. See [Compose](/docker/compose).
-2. **The edge stack** (`deploy/swarm-edge-nodes.yml`, stack name `edge`) is a Docker Swarm stack across the Pis, with one service per IMU and camera. It isn't left running. When you click Start Monitoring or Start Session, `fastapi-app` asks `stack-controller` to deploy it, with only the devices you selected. Stopping takes it down again. See [Swarm](/docker/swarm) and [Stack controller & device selection](/docker/stack-controller).
+1. **The broker stack** (`docker-compose.yml`) runs all the time on the AMS host: the MQTT broker, `fastapi-app`, the robot TCP server, `camera-processor`, the web dashboard, NTP, pgAdmin and `stack-controller`. See [Compose](/docker/compose).
+2. **The edge stack** (`deploy/swarm-edge-nodes.yml`, stack name `edge`) is a Docker Swarm stack across the Pis, with one service per IMU and camera. It isn't left running. When you click Start Monitoring or Start Session, `fastapi-app` asks `stack-controller` to deploy it, with only the devices you selected. Stopping takes it down again, unless a PLC stop with [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running) keeps it up for the next session. See [Swarm](/docker/swarm) and [Stack controller & device selection](/docker/stack-controller).
 
 ## The web app has two frontends
 
@@ -59,6 +59,7 @@ IMUs and cameras publish MQTT to `192.168.2.100:1883`. The robot (FANUC controll
 | --- | --- |
 | `fast_server/` | `fastapi-app`: routes, MQTT ingestion, capture state, health, PLC listener, run parameters |
 | `tcp_server/` | The robot TCP listener (its own container) |
+| `camera_processor/` | `camera-processor`: ArUco detection and pose for the camera Pis' frames |
 | `db/` | Database access (`database.py`), `schema.sql`, and the hand-run migration log `migrations.md` |
 | `common/` | The JSON log record every service writes |
 | `stack_controller/` | The agent that deploys and removes Swarm stacks for `fastapi-app`, plus the container watchdog and log reader |

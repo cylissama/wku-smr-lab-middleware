@@ -12,6 +12,7 @@ Two ideas decide what happens to every message a device sends: the **capture mod
 | **Monitor** | Monitoring — not saved | selected devices running | live samples on the dashboard | nothing written |
 | **Record** | Recording | selected devices running | queued for storage (no `[live]` lines; tiles still show rate) | batched inserts into the open session |
 | **Stopping** | Stopping — flushing data | being removed | new data dropped | the last batches are written |
+| **Monitor** after a PLC stop, with [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running) | Edge standby | still running, on the recording settings, waiting for the next `Data_Start` | nothing arrives between runs | nothing written |
 
 ![Capture-mode state machine](capture-state-machine.png)
 
@@ -19,7 +20,7 @@ Two ideas decide what happens to every message a device sends: the **capture mod
 
 Rules worth knowing:
 
-- **Monitor** can only start from Idle, and only goes back to Idle. A session can start from Idle or from Monitor.
+- **Monitor** can only start from Idle, and only goes back to Idle. A session can start from Idle or from Monitor. The one other way into Monitor is *Edge standby*, after a PLC-stopped session with Keep edge running on.
 - Only the **selected devices** are let through in Monitor and Record. Anything else, such as a container started by hand or a device on the wrong MQTT topic, is dropped. See [Stack controller & device selection](/docker/stack-controller#step-6-—-the-selection-gates-the-data).
 - Each queued item carries its session id. If a batch belongs to a session that has ended, or the database says no session is open, the batch is **dropped rather than carried into the next session**.
 - After a restart, `fastapi-app` comes back in Record if the database still has an open session, with that session's device selection. Otherwise it comes back Idle.
@@ -50,13 +51,13 @@ If the deploy fails, the session is ended again and the mode goes back to where 
 
 ### Stopping
 
-The Stop Session button (`GET /session/stop`) and [PLC auto stop](/operations/plc-auto-stop) run the same steps:
+The Stop Session button (`GET /session/stop`) and [PLC auto stop](/operations/plc-auto-stop) run the same steps (except where noted for *Keep edge running*):
 
 1. Switch to Stopping, which closes the gate.
-2. Remove the edge stack, and wait until its containers on the Pis have stopped (normally about 4 s, at most `REMOVE_WAIT_S`, 30 s). A start right after can't overlap the old containers, which would share their MQTT client ids and IMU sockets.
+2. Remove the edge stack, and wait until its containers on the Pis have stopped (normally about 4 s, at most `REMOVE_WAIT_S`, 30 s). A start right after can't overlap the old containers, which would share their MQTT client ids and IMU sockets. Skipped after a PLC stop with *Keep edge running* on.
 3. Wait up to 10 s for the IMU, camera and robot queues to drain.
 4. End the session row.
-5. Switch to Idle.
+5. Switch to Idle, or to Monitor (*Edge standby*) if the stacks were kept running.
 6. Start a `pg_dump` backup in the background. It doesn't hold the lock, so the next start isn't held up by it.
 
 Stopping works with the database down too. The stacks still come down, and the end time is written once the database is back.

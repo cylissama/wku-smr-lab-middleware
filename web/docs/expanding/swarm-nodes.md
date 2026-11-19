@@ -173,12 +173,12 @@ On the AMS host, in `/home/ubuntu/wku-smr-lab-middleware`:
 
 ## Adding a camera node
 
-The same Swarm steps apply (join, label `camera=<name>`, add a service block like `camera-cam1`, add the `CAMERA_<NAME>_*` variables to `deploy/.env`). The device key is `camera/<device_id>_<name>`.
+The same Swarm steps apply (join, label `camera=cam<N>`, add a service block like `camera-cam1`, add the `CAMERA_CAM<N>_*` variables to `deploy/.env` and `deploy/.env.example`). The device key is `camera/<device_id>_<name>`, and the device id is the last octet of the Pi's IP (RPICAM1 at .114 → `114_cam1`). The marker sizes are shared by all cameras ([ArUco markers](/hardware/aruco-markers)).
 
 What a camera Pi needs before it joins (as found on RPICAM3):
 
 - **`camera-hw.service`** (systemd), running `python -m camera_host` from `/home/admin/wku-smr-lab-camera-edge-node/camera-swarm-fusion` (with its `.venv`), as `admin` with the `video` group. It opens `/dev/video0` (`CAMERA_DEVICE`) and creates the socket `/run/camera-hw/camera.sock` (`RuntimeDirectory=camera-hw`).
-- **`/opt/camera-sensor-fusion/data`**, which the container mounts at `/app/data`. `camera_edge` writes each run's frames to `data/sessions/<name>_session_<time>/` there.
+- **`/opt/camera-sensor-fusion/data`**, which the container mounts at `/app/data`. With local processing, `camera_edge` writes each run's frames to `data/sessions/<name>_session_<time>/` there; with remote processing (the default) the run folders are on the AMS instead.
 - **`camera-edge:latest`** in the Pi's local image store. The calibration files are inside the image (`/app/calib/`), so `CAMERA_<NAME>_CALIBRATION_PATH` is a path like `calib/c920s_1920x1080.yml`.
 
 Check it on the Pi with `systemctl status camera-hw`, `ls -l /run/camera-hw/camera.sock` and `docker images camera-edge`.

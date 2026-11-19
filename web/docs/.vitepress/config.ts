@@ -39,6 +39,7 @@ export default defineConfig({
           { text: 'Data Broker Mini PC', link: '/hardware/data-broker-mini-pc' },
           { text: 'IMU Nodes', link: '/hardware/imu' },
           { text: 'Camera Nodes', link: '/hardware/camera' },
+          { text: 'ArUco Markers', link: '/hardware/aruco-markers' },
           { text: 'Robot Arm', link: '/hardware/robot-arm' },
           { text: 'Cell PLC', link: '/hardware/plc' },
         ],

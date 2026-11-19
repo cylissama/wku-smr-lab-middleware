@@ -4,7 +4,7 @@
 
 ## The cluster
 
-The **AMS host** (`IIoT`, 192.168.2.100) is the Swarm **manager**. Every IMU and camera Pi is a **worker**. On the AMS host:
+The **AMS host** (`AMS`, 192.168.2.100) is the Swarm **manager**. Every IMU and camera Pi is a **worker**. On the AMS host:
 
 ```bash
 docker node ls
@@ -12,7 +12,7 @@ docker node ls
 
 | Node | Role | Runs |
 | --- | --- | --- |
-| IIoT | manager (leader) | nothing from the edge stack; it's where stacks are deployed from |
+| AMS | manager (leader) | nothing from the edge stack; it's where stacks are deployed from |
 | RPIIMUJ1 … RPIIMUJ6 | worker | `imu-106` … `imu-111` |
 | RPICAM1 | worker, label `camera=cam1` | `camera-cam1` |
 | RPICAM2 | worker, label `camera=cam2` | `camera-cam2` |
@@ -23,7 +23,7 @@ docker node ls
 
 All edge devices are in one stack file, `deploy/swarm-edge-nodes.yml`, deployed as stack **`edge`** (so services are named `edge_imu-106`, `edge_camera-cam1`, …). Its `${VAR}`s come from `deploy/.env` (see [Two `.env` files](/docker/compose#two-env-files)).
 
-**Nobody deploys it by hand in normal use.** Start Monitoring and Start Session make `fastapi-app` ask [stack-controller](/docker/stack-controller) to deploy only the selected devices (`--prune` removes the rest), with the settings for that mode ([PLC trigger](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session), [run parameters](/operations/run-parameters)). Stopping removes the stack.
+**Nobody deploys it by hand in normal use.** Start Monitoring and Start Session make `fastapi-app` ask [stack-controller](/docker/stack-controller) to deploy only the selected devices (`--prune` removes the rest), with the settings for that mode ([PLC trigger](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session), [run parameters](/operations/run-parameters)). Stopping removes the stack, except after a PLC stop with [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running) on.
 
 Each service has:
 
