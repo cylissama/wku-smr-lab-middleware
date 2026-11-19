@@ -393,6 +393,7 @@ class DeployConfigTests(unittest.TestCase):
             self.assertIn("CAMERA_PROCESSING", env, name)
             self.assertIn("camera_frames", env["CAMERA_FRAME_TOPIC_PREFIX"], name)
             self.assertEqual(env["CAMERA_FPS"], "${CAMERA_FPS:-15}", name)  # else camera_edge's 15
+            self.assertEqual(env["CAMERA_STOP_SESSION_ON_EXIT"], "true", name)  # new fps on redeploy
 
 
 if __name__ == "__main__":
