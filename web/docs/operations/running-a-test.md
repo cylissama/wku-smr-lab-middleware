@@ -97,7 +97,7 @@ The robot is started manually by the operator in the downstairs lab. Coordinate 
 
 ## 7. Stop
 
-With PLC auto stop on (the lab default), you don't have to do anything. When the robot finishes, the PLC pulses `Db_Stop` and the session stops itself. The dashboard switches to **Idle** (or **Edge standby** with Keep edge running on) within about 5 s. See [PLC auto stop](/operations/plc-auto-stop).
+With PLC auto stop on (the lab default), you don't have to do anything. When the robot finishes, the PLC pulses `Db_Stop` and the session stops itself. The dashboard switches to **Idle** within about 5 s (with Keep edge running on, the next session starts instead). See [PLC auto stop](/operations/plc-auto-stop).
 
 Otherwise, click **Stop Session**. Either way, the AMS:
 
@@ -109,7 +109,7 @@ Otherwise, click **Stop Session**. Either way, the AMS:
 
 Start Session stays greyed out until all of this but the backup is done, so you can start the next run as soon as it's enabled again.
 
-**Running several sessions back to back?** Turn on **Keep edge running** in Run Parameters. After a PLC stop, step 2 is skipped: the devices stay up (the badge shows **Edge standby**) and the next Start Session doesn't redeploy them, so the robot can go right away. A manual Stop still removes them, and **Take Edge Down** removes them when you're done. See [Back-to-back sessions](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running).
+**Running several sessions back to back?** Turn on **Keep edge running** in Run Parameters. After a PLC stop, step 2 is skipped: the devices stay up and a new session with the same type and devices starts by itself, so the robot can go right away and its next run gets a new session id. Click **Stop Session** after the last run: a manual Stop ends the open session and removes the devices. See [Back-to-back sessions](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running).
 
 ## 8. Review the data
 

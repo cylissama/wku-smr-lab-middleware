@@ -28,7 +28,7 @@ SELECT id, label, parameters->>'IMU_SAMPLE_HZ' AS imu_hz FROM session ORDER BY i
 
 *Wait for PLC start* (PLC group) sets `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` for recording sessions only, so it covers the IMUs and the cameras. Monitoring streams without waiting. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
-*Keep edge running* (PLC group) leaves the IMUs and cameras up when the PLC's `Db_Stop` ends a session, so the next session starts without a redeploy. Only an AMS setting, so changing it doesn't restart anything. See [Back-to-back sessions](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running).
+*Keep edge running* (PLC group) leaves the IMUs and cameras up when the PLC's `Db_Stop` ends a session and starts the next session (same type and devices) right away, without a redeploy. Only an AMS setting, so changing it doesn't restart anything. See [Back-to-back sessions](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running).
 
 *Simulated PLC IP* is the other way round: it only affects monitoring, which then waits for that PLC's `Data_Start`. The real PLC (`192.168.1.103`) is refused. Sessions don't use it, so it's left out of `session.parameters` and the Start Session confirmation. See [Monitoring with a simulated PLC](/operations/plc-auto-stop#monitoring-with-a-simulated-plc).
 
