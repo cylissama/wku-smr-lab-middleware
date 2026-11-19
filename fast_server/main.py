@@ -1,5 +1,4 @@
 import asyncio, logging, os, time
-from datetime import datetime, timezone
 
 import aiohttp
 import asyncpg
@@ -211,11 +210,6 @@ session_lock = asyncio.Lock()
 # answered "already stopped" instead of failing on "no open session".
 last_stop: tuple[int | None, float, str | None] | None = None
 ALREADY_STOPPED_WINDOW = 30.0
-
-# (label, session_label, is_test_session) the recording session was started
-# with, so a PLC stop with KEEP_EDGE_RUNNING can open the next one the same way.
-# None after a restart that resumed a session from the DB.
-session_meta: tuple[str, str, bool] | None = None
 
 # Started by startup() when PLC_AUTO_STOP is on
 plc_watcher: PLCSignalWatcher | None = None
@@ -1123,7 +1117,6 @@ async def _start_session(
     is_test_session: bool,
     devices: list[str] | None,
 ) -> dict[str, Any]:
-    global session_meta
 
     # A session is a DB row -- refuse (503) before touching stacks or the gate
     require_db()
@@ -1156,7 +1149,6 @@ async def _start_session(
             label=label, session_label_name=session_label, is_test_session=is_test_session, devices=selected,
             parameters=parameters,
         )
-        session_meta = (label, session_label, is_test_session)
 
         changed = ", ".join(f"{k}={v}" for k, v in sorted(run_overrides.items()))
         loggers.log_event(f"Session {session_id} started: {label} (type: {session_label}, "
@@ -1193,7 +1185,6 @@ async def _start_session(
                 await set_capture(CaptureMode.MONITOR, devices=monitored_devices, standby=was_standby)
             else:
                 await set_capture(CaptureMode.IDLE)
-            session_meta = None
             try:
                 await db.end_session()
             except Exception as rollback_err:
@@ -1417,9 +1408,7 @@ async def plc_supervisor() -> None:
 # The robot finished: stop the session exactly as the Stop button does. Only a
 # recording session is stopped -- monitoring and idle ignore the pulse, and so
 # does a start or stop already in progress (a pulse during a start belongs to
-# the robot's previous run, not the session being started). With
-# KEEP_EDGE_RUNNING the edge stays up and the next session starts right away
-# (same type/devices), so the robot's next run lands under a new session id.
+# the robot's previous run, not the session being started).
 async def stop_session_from_plc() -> dict[str, Any] | None:
     session_id = capture.session_id
 
@@ -1433,39 +1422,7 @@ async def stop_session_from_plc() -> dict[str, Any] | None:
         loggers.log_event(f"PLC {PLC_TAG_STOP} pulse (robot finished): stopping session {session_id}",
                           category="session", session_id=session_id)
         await broadcast_message(misc_manager, f"Robot finished (PLC {PLC_TAG_STOP}): stopping session {session_id}", "info")
-        if not keep_edge_running():
-            return await _stop_session(reason=f"robot finished, PLC {PLC_TAG_STOP}")
-
-        meta = session_meta
-        result = await _stop_session(reason=f"robot finished, PLC {PLC_TAG_STOP}", keep_edge=True)
-        if not result.get("success") or result.get("degraded") or not edge_standby:
-            return result
-        if meta is None:
-            msg = (f"Session {session_id} was resumed after a restart, so its type isn't known: "
-                   f"edge kept running, but start the next session from the dashboard")
-            loggers.log_event(msg, category="session", level=logging.WARNING, session_id=session_id)
-            await broadcast_message(misc_manager, msg, "error")
-            return result
-
-        result["next"] = await _start_next_session(meta)
-        return result
-
-# Opens the session after a PLC stop with the edge kept up: same type, test
-# flag and device selection, label in the dashboard's <type>_<ISO time> form.
-# Called under session_lock from standby, so _start_session skips the redeploy;
-# if it fails, it leaves the standby as it was.
-async def _start_next_session(meta: tuple[str, str, bool]) -> dict[str, Any]:
-    old_label, session_label, is_test_session = meta
-    prefix = old_label.rsplit("_", 1)[0] if "_" in old_label else old_label
-    stamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-    devices = sorted(capture.devices) if capture.devices is not None else None
-
-    started = await _start_session(f"{prefix}_{stamp}", session_label, is_test_session, devices)
-    if started.get("success"):
-        msg = f"Session {started['id']} started automatically after the PLC stop (edge kept running)"
-        loggers.log_event(msg, category="session", session_id=started["id"])
-        await broadcast_message(misc_manager, msg, "info")
-    return started
+        return await _stop_session(reason=f"robot finished, PLC {PLC_TAG_STOP}", keep_edge=keep_edge_running())
 
 # Background tasks started at boot -- kept referenced so they aren't GC'd
 _background_tasks: set[asyncio.Task] = set()

@@ -135,7 +135,6 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
             # A fresh lock per test: asyncio.Lock binds to the loop it first waits on
             patch("fast_server.main.session_lock", asyncio.Lock()),
             patch("fast_server.main.last_stop", None),
-            patch("fast_server.main.session_meta", None),
             patch("fast_server.main.backup_task", None),
             patch("fast_server.main.backup_requested", False),
         ]
@@ -152,7 +151,7 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         m.health.components["db"]["status"] = "ok"
 
     async def asyncTearDown(self):
-        for p in reversed(self.patches):
+        for p in self.patches:
             p.stop()
         m.capture.set(CaptureMode.IDLE)
 
@@ -224,12 +223,10 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         self.db.end_session.assert_awaited_once()
         self.remove.assert_awaited_once()
 
-    # Without the session's type (resumed after a restart) there's no next session
     async def test_keep_edge_running_leaves_the_stacks_up_after_a_plc_stop(self):
         m.capture.set(CaptureMode.RECORD, session_id=7, devices={"imu/106"})
 
-        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False), \
-             patch.object(m, "session_meta", None):
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
             result = await m.stop_session_from_plc()
             capture = await m.get_capture()
 
@@ -241,63 +238,6 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         # Monitored with the recorded selection, armed for the next session
         self.assertEqual((m.capture.mode, m.capture.devices), (CaptureMode.MONITOR, {"imu/106"}))
         self.assertTrue(capture["standby"])
-
-    def _record_with_meta(self, session_id, devices=None):
-        m.capture.set(CaptureMode.RECORD, session_id=session_id, devices=devices)
-        self.db.create_session = AsyncMock(return_value=session_id + 1)
-        self.deploy = AsyncMock(return_value={})
-        for p in (patch.object(m, "session_meta", ("Full_System_2026-11-19T19:43:52.735Z", "Full System", False)),
-                  patch.object(m, "deploy_managed_stacks", self.deploy),
-                  patch.object(m, "resolve_selection", AsyncMock(return_value=(devices, None))),
-                  patch.object(m, "effective_run_params", AsyncMock(return_value={})),
-                  patch.object(m, "deployed_env", m.stack_env(CaptureMode.RECORD))):
-            p.start()
-            self.patches.append(p)
-
-    async def test_keep_edge_running_starts_the_next_session_after_a_plc_stop(self):
-        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
-            self._record_with_meta(7, devices={"imu/106"})
-            result = await m.stop_session_from_plc()
-            capture = await m.get_capture()
-
-        self.assertTrue(result["success"])
-        self.assertTrue(result["next"]["success"])
-        self.db.end_session.assert_awaited_once()
-        self.remove.assert_not_awaited()
-        self.deploy.assert_not_awaited()
-        # New session, same type/test flag/devices, dashboard-style label
-        args = self.db.create_session.await_args.kwargs
-        self.assertEqual((args["session_label_name"], args["is_test_session"], args["devices"]),
-                         ("Full System", False, {"imu/106"}))
-        self.assertRegex(args["label"], r"^Full_System_\d{4}-\d\d-\d\dT[\d:.]+Z$")
-        self.assertNotEqual(args["label"], "Full_System_2026-11-19T19:43:52.735Z")
-        self.assertEqual((m.capture.mode, m.capture.session_id, m.capture.devices),
-                         (CaptureMode.RECORD, 8, {"imu/106"}))
-        self.assertFalse(capture["standby"])
-
-    async def test_keep_edge_running_failed_next_start_stays_in_standby(self):
-        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
-            self._record_with_meta(7)
-            self.db.create_session = AsyncMock(side_effect=RuntimeError("label taken"))
-            result = await m.stop_session_from_plc()
-            standby = m.edge_standby
-
-        self.assertTrue(result["success"])
-        self.assertFalse(result["next"]["success"])
-        self.remove.assert_not_awaited()
-        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
-        self.assertTrue(standby)
-
-    async def test_stop_click_after_an_automatic_next_session_stops_it(self):
-        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
-            self._record_with_meta(7)
-            await m.stop_session_from_plc()
-            result = await m.stop_session()
-
-        self.assertNotIn("already_stopped", result)
-        self.assertEqual(self.db.end_session.await_count, 2)
-        self.remove.assert_awaited_once()
-        self.assertEqual(m.capture.mode, CaptureMode.IDLE)
 
     async def test_keep_edge_running_manual_stop_still_tears_down(self):
         m.capture.set(CaptureMode.RECORD, session_id=8)
