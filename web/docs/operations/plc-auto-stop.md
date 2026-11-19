@@ -13,7 +13,7 @@ When the robot finishes its move, the cell's PLC pulses the tag `Db_Stop` (a bri
 
 | Capture mode when the pulse arrives | Result |
 | --- | --- |
-| **Recording** | Session stops. The Messages box shows "Robot finished (PLC Db_Stop): stopping session N", and the log line reads "Session N stopped (robot finished, PLC Db_Stop)". With *Keep edge running* on, the edge stacks stay up and the next session starts by itself ([below](#back-to-back-sessions-keep-edge-running)). |
+| **Recording** | Session stops. The Messages box shows "Robot finished (PLC Db_Stop): stopping session N", and the log line reads "Session N stopped (robot finished, PLC Db_Stop)". With *Keep edge running* on, the edge stacks stay up ([below](#back-to-back-sessions-keep-edge-running)). |
 | **Monitoring** | Ignored. Monitoring keeps running. |
 | **Idle** | Ignored. |
 | A session start or stop is already in progress | Ignored. A pulse during a start belongs to the robot's previous run. |
@@ -29,14 +29,14 @@ Every session normally deploys the edge stack on Start and removes it on Stop. T
 With **Keep edge running** on (Run Parameters, PLC group; default from `KEEP_EDGE_RUNNING` in the repo-root `.env`), a session that the PLC's `Db_Stop` ends leaves the edge stacks running:
 
 1. The gate closes, the buffers drain, the session ends and the backup starts, as usual, but the stacks aren't removed.
-2. A **new session starts right away** with the same session type, test flag and devices (label `<type>_<time>`, like a Start click). The log reads "Session N+1 started automatically after the PLC stop (edge kept running)". No redeploy, so there is no need to wait for "Edge ready": the IMUs and cameras are still in PLC trigger mode. After `Db_Stop` they stop sending and wait for the next `Data_Start`, and the robot's next run is stored under the new session id.
-3. Repeat: each `Db_Stop` closes one session and opens the next. When you're done, click **Stop Session**. That ends the last (open) session and takes the stacks down.
+2. Capture goes to **monitor** with the session's devices, shown as **Edge standby** on the dashboard (`standby: true` in `GET /capture`). The IMUs and cameras are still in PLC trigger mode: after `Db_Stop` they stop sending and wait for the next `Data_Start`, so nothing is shown or stored between runs.
+3. **Start Session** with the same devices and run parameters just opens the gate. No redeploy, so there is no need to wait for "Edge ready" before starting the robot.
 
-If the new session can't be started (for example the database is down when the stop happens), capture stays in **monitor** with the session's devices, shown as **Edge standby** on the dashboard (`standby: true` in `GET /capture`). **Start Session** with the same devices and run parameters then just opens the gate. A different device selection or changed run parameters still redeploy on Start. Changing an edge run parameter in standby redeploys right away with the recording settings, so the stacks stay armed. **Take Edge Down** (the monitor button) removes the stacks. The same standby happens if `fastapi-app` restarted during the session: it resumed the session from the database but doesn't know its session type.
+A different device selection or changed run parameters still redeploy on Start. Changing an edge run parameter in standby redeploys right away with the recording settings, so the stacks stay armed. **Take Edge Down** (the monitor button) removes the stacks.
 
 A manual **Stop Session** always takes the stacks down, even with the toggle on: the robot may still be mid-run, the IMUs and cameras keep sending until `Db_Stop` or their max-run timeout, and a session started in that window would record the end of the old run.
 
-If `fastapi-app` restarts during Edge standby it comes back **Idle** with the stacks still up. The next start redeploys them in place.
+If `fastapi-app` restarts during standby it comes back **Idle** with the stacks still up. The next start redeploys them in place.
 
 ## PLC trigger: monitor vs. session {#imu-plc-trigger-monitor-vs-session}
 

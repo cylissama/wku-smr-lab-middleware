@@ -10,7 +10,7 @@ The robot cell is controlled by an Allen-Bradley **1769-L32E** CompactLogix PLC.
 
 ## Tags
 
-All three are **DINT** pulses (0 → 1 → 0). Readers count rising edges: the IMU and camera Pis poll every 10 ms (`IMU_PLC_POLL_S`/`CAMERA_PLC_POLL_S`), `fastapi-app` every 50 ms (`PLC_POLL_S`).
+All three are **DINT** pulses (0 → 1 → 0). Readers count rising edges, polling every 50 ms.
 
 | Tag | Meaning | Used by |
 | --- | --- | --- |
