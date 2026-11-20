@@ -22,10 +22,10 @@ On screens narrower than 1840 px, the Field Devices card is hidden and the Run P
 
 | Control | What it does |
 | --- | --- |
-| Session indicator, mode badge | Whether a session is open, and the [capture mode](/overview/capture-modes): Idle, Monitoring, Recording or Stopping |
+| Session indicator, mode badge | Whether a session is open, and the [capture mode](/overview/capture-modes): Idle, Monitoring, Recording, Stopping, or Edge standby (devices kept up after a PLC stop, see [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running)) |
 | Most Recent Session | Id of the newest session in the database |
 | Session type dropdown | The session's category (`session_label`); needs the database |
-| **Start Monitoring / Stop Monitoring** | Runs the selected devices and shows live data without storing anything |
+| **Start Monitoring / Stop Monitoring** | Runs the selected devices and shows live data without storing anything. In Edge standby the button reads **Take Edge Down** and removes the devices |
 | **Start Session** | Click twice: the first click asks you to confirm and lists any changed run parameters |
 | **Stop Session** | Stops recording, waits for the edge containers to stop, drains the buffers, ends the session and starts a backup |
 | Edge readiness banner | While monitoring or recording: amber with the devices still starting, then green "Edge ready at …" with the exact time every selected edge device was healthy. See [Edge readiness](/overview/capture-modes#edge-readiness) |
@@ -48,7 +48,7 @@ Under the device name, each tile shows the **robot joint** an IMU is mounted on 
 
 ## Run Parameters (right)
 
-Per-run settings such as the IMU sample rate. You edit, then click Apply. The panel is locked while a session is recording. See [Run parameters](/operations/run-parameters).
+Per-run settings: the IMU sample rate and max run time, the PLC options (wait for PLC start, keep edge running, simulated PLC IP) and the camera Pis' frame saving. You edit, then click Apply. The panel is locked while a session is recording. See [Run parameters](/operations/run-parameters).
 
 ## Message boxes
 

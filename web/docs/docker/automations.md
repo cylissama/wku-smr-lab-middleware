@@ -17,15 +17,22 @@ Both `fastapi-app` (IMU/camera) and `tcp` (robot) run background `asyncio` worke
 
 ## Edge stack up and down with each run
 
-Start Monitoring and Start Session deploy the selected edge devices; Stop Monitoring and Stop Session remove them. Nobody runs `docker stack deploy` by hand. See [Stack controller & device selection](/docker/stack-controller).
+Start Monitoring and Start Session deploy the selected edge devices; Stop Monitoring and Stop Session remove them. The exception is a PLC stop with [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running) on, which leaves them up for the next session. Nobody runs `docker stack deploy` by hand. See [Stack controller & device selection](/docker/stack-controller).
 
 ## PLC auto stop
 
-When the robot finishes, the cell PLC pulses `Db_Stop` and the recording session stops by itself, with the same steps as the Stop button. See [PLC auto stop](/operations/plc-auto-stop).
+When the robot finishes, the cell PLC pulses `Db_Stop` and the recording session stops by itself, with the same steps as the Stop button (minus the stack removal when Keep edge running is on). See [PLC auto stop](/operations/plc-auto-stop).
 
 ## Time synchronization
 
-The `ntp` container syncs from Google's public NTP pool automatically and is the shared clock for every other container. On hosts where this matters, the host's own `chrony`/`systemd-timesyncd` are stopped, disabled, and **masked**, so nothing on the host can silently re-enable a competing time source — the container's NTP sync is the only one running.
+Two NTP clients run on the AMS, and only one of them sets the clock:
+
+- **`systemd-timesyncd` on the host** syncs the AMS kernel clock from `ntp.ubuntu.com` (`timedatectl` shows `System clock synchronized: yes`). Every container reads this clock, so it's the source of `recorded_at`, `ingested_at`, session start/end times and log timestamps.
+- **The `ntp` container** (`cturra/ntp`, chrony) syncs from `time1`–`time4.google.com` and serves NTP to the lab on UDP 123 (`NTP_PORT`). It runs `chronyd -x`, so it doesn't set the system clock even though it has `SYS_TIME`. Check it with `docker exec AMS-ntp chronyc tracking`.
+
+On 2026-11-18 the two agreed to about 0.5 ms. The `NTP_SERVER=ntp` variable set on `fastapi-app` and `tcp` isn't read by any code.
+
+The robot controller isn't synced to either; see [Robot Arm → Timestamps](/hardware/robot-arm#timestamps).
 
 ## Dashboard document library generation
 

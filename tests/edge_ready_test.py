@@ -21,11 +21,11 @@ class SummarizeEdgeTests(unittest.TestCase):
     def test_ready_at_is_when_the_last_device_turned_healthy(self):
         summary = m.summarize_edge([
             {"key": "imu/106", "state": "running", "since": 105.0},
-            {"key": "camera/113_front", "state": "running", "since": 109.5},
+            {"key": "camera/113_cam1", "state": "running", "since": 109.5},
         ], started=100.0)
 
         self.assertEqual(summary["state"], "ready")
-        self.assertEqual((summary["ready_at"], summary["last"]), (109.5, "camera/113_front"))
+        self.assertEqual((summary["ready_at"], summary["last"]), (109.5, "camera/113_cam1"))
 
     def test_devices_already_healthy_count_from_the_start(self):
         # Monitoring -> recording without a redeploy: containers predate the start

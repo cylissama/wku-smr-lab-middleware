@@ -13,7 +13,7 @@ The robot run is coordinated with the [cell PLC](/hardware/plc). When the run en
 | Field | Type | Description | Example Value |
 |---|---|---|---|
 | `id` | Integer | Unique row identifier for the record | `398479` |
-| `ts_epoch` | Integer (epoch s) | Timestamp of the robot controller clock at time of sample | `1552447821` |
+| `ts_epoch` | Integer (packed FANUC time, **not** epoch s) | Robot controller clock from Karel `GET_TIME`, 2 s resolution. See [Timestamps](#timestamps) | `1567388808` (= 2026-11-12 14:36:16 robot time) |
 | `joint_1` | Float | Joint 1 angle/position (likely degrees) | `0.001674` |
 | `joint_2` | Float | Joint 2 angle/position (likely degrees) | `0.001414` |
 | `joint_3` | Float | Joint 3 angle/position (likely degrees) | `-0.001159` |
@@ -26,11 +26,60 @@ The robot run is coordinated with the [cell PLC](/hardware/plc). When the run en
 | `w` | Float | TCP orientation, yaw component (likely degrees) | `179.999` |
 | `p` | Float | TCP orientation, pitch component (likely degrees) | `0.001` |
 | `r` | Float | TCP orientation, roll component (likely degrees) | `0.001` |
-| `recorded_at` | Float (epoch s) | Timestamp when the sample was recorded | `1775679035.11709` |
-| `ingested_at` | Float (epoch s) | Timestamp when the record was ingested into the system | `1775679035.298104` |
+| `recorded_at` | Float (epoch s, UTC) | AMS clock when `tcp_server` received the line | `1775679035.11709` |
+| `ingested_at` | Float (epoch s, UTC) | AMS clock when the batch was written to Postgres (one value per batch) | `1775679035.298104` |
 | `device_id` | Integer | Identifier of the robot/device | `2` |
 | `session_id` | Integer | Identifier of the recording session | `318` |
-| `frame_id` | Integer | Frame/sequence identifier for the sample | `1` |
+| `frame_id` | Integer | The Karel loop counter `count` (starts at 1 each time the program starts) | `1` |
+
+## Timestamps
+
+Each robot row has three timestamps from two different clocks. Only the two set on the AMS are NTP-synced.
+
+| Column | Where it's recorded | Clock | NTP-synced |
+|---|---|---|---|
+| `ts_epoch` | On the robot controller: `GET_TIME(t_int)` in the Karel loop below, sent as CSV field 1 | Robot controller's own clock | **No** |
+| `recorded_at` | In `tcp_server/tcp_server.py`, when the line arrives: `datetime.now(timezone.utc)` | AMS host clock | Yes |
+| `ingested_at` | In `db/database.py` `insert_robot_batch()`, once per batch flush: `get_time()` | AMS host clock | Yes |
+
+The robot also sends `ts_str` (CSV field 2, from `CNV_TIME_STR`). It's parsed but not stored.
+
+### `ts_epoch` is packed FANUC time
+
+Despite the name, `ts_epoch` isn't Unix seconds. Karel's `GET_TIME` returns the date and time packed into bit fields, which is why the raw values look like dates in 2019:
+
+| Bits | Field |
+|---|---|
+| 31–25 | year − 1980 |
+| 24–21 | month |
+| 20–16 | day |
+| 15–11 | hour |
+| 10–5 | minute |
+| 4–0 | seconds ÷ 2 |
+
+Decoding in Python:
+
+```python
+from datetime import datetime
+
+def decode_fanuc_time(t):
+    t = int(t)
+    return datetime((t >> 25) + 1980, (t >> 21) & 15, (t >> 16) & 31,
+                    (t >> 11) & 31, (t >> 5) & 63, (t & 31) * 2)
+
+decode_fanuc_time(1567388808)  # 2026-11-12 14:36:16, robot local time
+```
+
+Things to know before using it:
+
+- **2-second resolution.** The seconds field is stored halved, so `ts_epoch` changes once every 2 s. At the robot's ~17 lines per second, about 30 consecutive rows share a value. (This is why it looks like it "updates per motion segment".)
+- **Robot local time, no timezone.** The controller clock reads a fixed UTC−5 and doesn't change for daylight saving. That matches Central time in summer and reads an hour ahead of Central in winter.
+- **Not NTP-synced; it drifts.** Compared with `recorded_at`, the robot clock (taken as UTC−5) was about −10 s off in April 2026, +12 s in September, +17 s in October and +21 s on 2026-11-12, so it's a free-running clock. Some late-2025 sessions decode to nonsense dates, so the clock was reset or wrong for a while. To sync it, set up the controller's SNTP client (Setup → Host Comm on the teach pendant, if the option is installed) with the AMS (`192.168.2.100`) as the server.
+- **Early sessions** have placeholder values such as `1` or `123456.789`, from test code.
+
+### Which one to use
+
+To line robot data up with the IMUs and cameras, use **`recorded_at`**. It's set by the NTP-synced AMS clock. The only error is the network delay from the controller to the AMS, normally a few ms on the lab LAN. `ingested_at` is about 0.5 s later because of batching (`B_TIMEOUT`), and every row in a batch shares the same value, so don't use it for sample timing. For ordering inside a session, use `frame_id`.
 
 ## Code behind the robot
 
@@ -144,4 +193,4 @@ END stream_pos;
 
 - `joint_1`–`joint_6` correspond to a 6-axis robot arm's joint positions; units are inferred as degrees (worth confirming against the robot's controller docs).
 - `x, y, z, w, p, r` follow a common industrial-robot TCP pose convention (position in mm + orientation as yaw/pitch/roll or similar), but the exact orientation convention should be confirmed against the robot manufacturer's spec.
-- `ts_epoch` vs `recorded_at` both appear to be timestamps — `ts_epoch` looks like it may update only per motion segment (repeated across rows) while `recorded_at` is per-sample.
+- `ts_epoch` is the robot's packed clock (2 s resolution, not NTP-synced) and `recorded_at` is the AMS's per-sample arrival time. See [Timestamps](#timestamps).

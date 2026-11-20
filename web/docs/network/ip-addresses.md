@@ -28,11 +28,12 @@ This page contains plaintext credentials for lab network equipment. It is commit
 | RPI_IMU_J5 | 192.168.1.110 | 2C:CF:67:BE:B1:4F | admin | password | |
 | RPI_IMU_J6 | 192.168.1.111 | | | | Hostname `RPIIMUJ6`; Swarm worker, service `imu-111` (`imu/111`). Replaces the old bench node RPI-IMU-BENCH |
 | RPI_IMU_GT | 192.168.1.112 | | | | Needs to be built and connected |
-| CAMERAFRONT | 192.168.1.113 | 2C:CF:67:4F:7F:BC | admin | admin | |
-| CAMERAPI2 | 192.168.1.114 | 88:a2:9e:02:e2:93 | admin | admin | |
-| RPICAM3 (was CameraPi3) | 192.168.1.94 | | admin | password | Swarm worker, label `camera=cam3` (service `camera-cam3`, `camera/115_cam3`); secondary IP `192.168.4.42` |
-| CameraPi4 | 192.168.1.116 | | | | Needs to be built and connected |
-| CameraPi5 | 192.168.1.117 | | | | Needs to be built and connected |
+| RPICAM2 (was CAMERAFRONT) | 192.168.1.113 | 2C:CF:67:4F:7F:BC | admin | admin | Swarm worker, label `camera=cam2` (service `camera-cam2`, `camera/113_cam2`) |
+| RPICAM1 (was CAMERAPI2) | 192.168.1.114 | 88:a2:9e:02:e2:93 | admin | admin | Swarm worker, label `camera=cam1` (service `camera-cam1`, `camera/114_cam1`) |
+| RPICAM3 (was CameraPi3) | 192.168.1.94 | | admin | password | Swarm worker, label `camera=cam3` (service `camera-cam3`, `camera/94_cam3`); secondary IP `192.168.4.42` |
+| — | 192.168.1.95 | | | | Was RPICAM4 until 2026-11-13 |
+| RPICAM4 | 192.168.1.60 | | | | Swarm worker, label `camera=cam4` (service `camera-cam4`, `camera/60_cam4`). Re-joined the Swarm at .60 on 2026-11-13 (was .95) |
+| RPICAM5 | 192.168.1.117 | | | | Needs to be built and connected |
 | — | 192.168.1.118 | | | | |
 | Alien Ware | 192.168.1.119 | | user | password | Needs to be moved and set up |
 | — | 192.168.1.120–124 | | | | |
@@ -43,7 +44,7 @@ USW PRO 24
 
 | Device | IP Address | MAC Address | Username | Password | Notes |
 | --- | --- | --- | --- | --- | --- |
-| data-team mini s | 192.168.2.100 | E8:FF:1E:D9:58:B4 | data-team (linux) | 1234 | `ssh data-team@192.168.2.100` |
+| data-team mini s | 192.168.2.100 | E8:FF:1E:D9:58:B4 | data-team (linux) | 1234 | The AMS host, hostname `AMS`. `ssh data-team@192.168.2.100` |
 | ntp_MINI_s | 192.168.2.101 | E8:FF:1E:D9:58:93 | ntp | password | |
 | Rack Pi | 192.168.2.31 | B8:27:EB:47:73:C3 | admin | password | |
 | dell | DHCP | B0:4F:13:0A:1D:EE | | | |

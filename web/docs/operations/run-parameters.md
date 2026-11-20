@@ -6,8 +6,11 @@ The **Run Parameters** panel on the dashboard sets per-run values for the edge d
 | --- | --- | --- | --- |
 | IMU sample rate | `IMU_SAMPLE_HZ` | 1–200 Hz | `deploy/.env` |
 | Wait for PLC start | `IMU_PLC_TRIGGER_ON_RECORD` | on/off | repo-root `.env` |
+| Keep edge running | `KEEP_EDGE_RUNNING` | on/off (default off) | repo-root `.env` |
 | Max PLC run | `IMU_PLC_MAX_RUN_S` | 30–3600 s | `deploy/.env` |
 | Simulated PLC IP | `MONITOR_PLC_IP` | IPv4, or empty/`0` for none | none |
+| Save frames on Pi | `CAMERA_EDGE_SAVE_FRAMES` | on/off | `deploy/.env` |
+| Save annotated on Pi | `CAMERA_EDGE_SAVE_ANNOTATED` | on/off | `deploy/.env` |
 
 ## How it behaves
 
@@ -15,7 +18,7 @@ The **Run Parameters** panel on the dashboard sets per-run values for the edge d
 - **Values stay set between runs** until someone changes or resets them. Before a session starts, the Start Session confirmation lists every changed parameter.
 - **Edit, then Apply.** Nothing is sent until you click Apply. Out-of-range values are refused and the tile says why.
 - **Idle:** the values apply on the next Start Monitoring or Start Session.
-- **Monitoring:** Apply redeploys the edge stack right away, which restarts the devices whose settings changed. Watch the IMU rate on the Devices box to check the change. *Wait for PLC start* only affects recording, so changing it doesn't restart anything.
+- **Monitoring:** Apply redeploys the edge stack right away, which restarts the devices whose settings changed. Watch the IMU rate on the Devices box to check the change. *Wait for PLC start* and *Keep edge running* only affect recording, so changing them doesn't restart anything. In Edge standby, Apply redeploys with the recording settings, so the devices stay armed for the next session.
 - **Recording / stopping:** the panel is locked and shows the values the session is running with.
 - **Every session records its values** in `session.parameters` (JSONB), defaults included:
 
@@ -25,7 +28,11 @@ SELECT id, label, parameters->>'IMU_SAMPLE_HZ' AS imu_hz FROM session ORDER BY i
 
 *Wait for PLC start* (PLC group) sets `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` for recording sessions only, so it covers the IMUs and the cameras. Monitoring streams without waiting. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
+*Keep edge running* (PLC group) leaves the IMUs and cameras up when the PLC's `Db_Stop` ends a session, so the next session starts without a redeploy. Only an AMS setting, so changing it doesn't restart anything. See [Back-to-back sessions](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running).
+
 *Simulated PLC IP* is the other way round: it only affects monitoring, which then waits for that PLC's `Data_Start`. The real PLC (`192.168.1.103`) is refused. Sessions don't use it, so it's left out of `session.parameters` and the Start Session confirmation. See [Monitoring with a simulated PLC](/operations/plc-auto-stop#monitoring-with-a-simulated-plc).
+
+*Save frames on Pi* and *Save annotated on Pi* (Camera group) set camera_edge's `CAMERA_SAVE_FRAMES` / `CAMERA_SAVE_ANNOTATED` on every camera Pi, so the Pi's SD card doesn't keep a copy of each raw or annotated frame. They only matter while a Pi processes frames itself (`CAMERA_PROCESSING=local`, or a camera-edge image built before the remote-processing patch). With remote processing the Pi saves nothing, and [camera-processor](/docker/camera-processor) on the AMS keeps the run folders. Its own `CAMERA_SAVE_*` flags are separate, in the repo-root `.env`. Turning these off doesn't stop the Pi's `detections.csv`. Changing either one while monitoring restarts the camera services.
 
 ## Where things live
 

@@ -26,7 +26,7 @@ There are three separate questions, answered in three different places:
 
 ```text
  Browser (dashboard)
-   │  ticks devices: imu/106, camera/113_front, robot/main
+   │  ticks devices: imu/106, camera/114_cam1, robot/main
    │
    │  POST /listen/start {"devices": [...]}            ← monitor (nothing stored)
    │  GET  /session/start/{label}?...&devices=...      ← record
@@ -38,22 +38,22 @@ There are three separate questions, answered in three different places:
    │
    │  POST http://stack-controller:8080/stacks/edge/deploy
    │       Authorization: Bearer $STACK_CONTROLLER_TOKEN
-   │       {"services": ["imu-106", "camera-front"]}
+   │       {"services": ["imu-106", "camera-cam1"]}
    ▼
  stack-controller  (AMS host, container AMS-stack-controller)
    │  writes a filtered copy of swarm-edge-nodes.yml (only those services)
    │  runs:  docker stack deploy --resolve-image never --prune -c /tmp/stack-XXXX.yml edge
    │         (Docker CLI inside the container → host's /var/run/docker.sock)
    ▼
- Docker daemon on the AMS host  =  Swarm manager (IIoT, 192.168.2.100)
-   │  creates/updates services edge_imu-106, edge_camera-front
+ Docker daemon on the AMS host  =  Swarm manager (AMS, 192.168.2.100)
+   │  creates/updates services edge_imu-106, edge_camera-cam1
    │  removes the rest of the stack's services (--prune)
    │  schedules each task onto its Pi using placement constraints
    ▼
  Raspberry Pis (Swarm workers)
      RPIIMUJ1 runs edge_imu-106  ──MQTT imu/106──►  mosquitto ──► fastapi-app
-     RPiCamFront runs edge_camera-front ──MQTT camera/113_front──► ...
-     (RPIIMUJ2..5, CameraPi2, RPICAM3: nothing scheduled)
+     RPICAM1 runs edge_camera-cam1 ──MQTT camera/114_cam1──► ...
+     (RPIIMUJ2..5, RPICAM2..4: nothing scheduled)
 ```
 
 ## Device keys: one name for a device everywhere
@@ -63,15 +63,15 @@ Every device is identified by a **device key** of the form `<category>/<device>`
 | Device | Key | Where the key comes from |
 |---|---|---|
 | IMU 106 | `imu/106` | its MQTT topic, `imu/${IMU_106_DEVICE_ID}` |
-| Front camera | `camera/113_front` | its MQTT topic, `camera/<device_id>_<name>` with `CAMERA_FRONT_DEVICE_ID=113`, `CAMERA_FRONT_NAME=front` (the `smr.device` label is `${CAMERA_FRONT_DEVICE_ID}_${CAMERA_FRONT_NAME}` to match) |
+| Camera 1 | `camera/114_cam1` | its MQTT topic, `camera/<device_id>_<name>` with `CAMERA_CAM1_DEVICE_ID=114`, `CAMERA_CAM1_NAME=cam1` (the `smr.device` label is `${CAMERA_CAM1_DEVICE_ID}_${CAMERA_CAM1_NAME}` to match) |
 | Robot arm | `robot/main` | fixed — the robot isn't a Swarm service (see [The robot is different](#the-robot-is-different)) |
 
 The key deliberately **matches the MQTT topic**, because that's the only thing the ingestion side ever sees: when `fastapi-app` receives a message on `imu/106`, `parse_imu_message()` takes `106` from the topic as `device_label`, and the gate checks `"imu/106"` against the selection. No lookup table is needed at message time.
 
-The Swarm **service name** (`imu-106`, `camera-front`) is a different thing — it's what `stack-controller` deploys. The device catalog (next section) is what connects a key to its service.
+The Swarm **service name** (`imu-106`, `camera-cam1`) is a different thing — it's what `stack-controller` deploys. The device catalog (next section) is what connects a key to its service.
 
 ::: warning Keys must match the real topic
-If a device publishes on a topic that doesn't match its `smr.device` label (say the camera actually published `camera/front`), the dashboard will still list it and Swarm will still start it, but every message will be dropped as "unselected" and the device will show **running · no data**. That's the symptom to look for.
+If a device publishes on a topic that doesn't match its `smr.device` label (say the camera actually published `camera/cam1`), the dashboard will still list it and Swarm will still start it, but every message will be dropped as "unselected" and the device will show **running · no data**. That's the symptom to look for.
 :::
 
 ## Step 1 — The device catalog
@@ -90,13 +90,13 @@ Each service in `deploy/swarm-edge-nodes.yml` carries two Swarm **service labels
         smr.device: "${IMU_106_DEVICE_ID}"
         smr.joint: "J1"         # optional: robot joint, shown on the Field Devices tile
       ...
-  camera-front:
+  camera-cam1:
     image: camera-edge:latest
     deploy:
       replicas: 1
       labels:
         smr.category: camera
-        smr.device: "${CAMERA_FRONT_DEVICE_ID}"
+        smr.device: "${CAMERA_CAM1_DEVICE_ID}_${CAMERA_CAM1_NAME}"
 ```
 
 `smr.device` uses the **same variable** the service already uses for its MQTT topic, so the two can't drift apart. Because they're real Swarm labels, they also show up on the running service:
@@ -126,8 +126,8 @@ Response:
   "services": [
     {"service": "imu-106", "category": "imu", "device_label": "106",
      "joint": "J1", "node": "RPIIMUJ1", "ip": "192.168.1.106"},
-    {"service": "camera-front", "category": "camera", "device_label": "113_front",
-     "joint": null, "node": "RPiCamFront", "ip": "192.168.1.114"},
+    {"service": "camera-cam1", "category": "camera", "device_label": "114_cam1",
+     "joint": null, "node": "RPICAM1", "ip": "192.168.1.114"},
     ...
   ],
   "success": true
@@ -161,11 +161,11 @@ The two calls carry the selection differently:
 POST /listen/start
 Content-Type: application/json
 
-{"devices": ["imu/106", "camera/113_front", "robot/main"]}
+{"devices": ["imu/106", "camera/114_cam1", "robot/main"]}
 ```
 
 ```http
-GET /session/start/Full_System_2026-10-08T17%3A00%3A00.000Z?is_test_session=true&session_label=Full%20System&devices=imu%2F106&devices=camera%2F113&devices=robot%2Fmain
+GET /session/start/Full_System_2026-10-08T17%3A00%3A00.000Z?is_test_session=true&session_label=Full%20System&devices=imu%2F106&devices=camera%2F114_cam1&devices=robot%2Fmain
 ```
 
 `/session/start` stays a `GET` for backward compatibility, so the selection is a **repeated query parameter**; the `/` inside each key is URL-encoded as `%2F`. Omitting `devices` entirely means "every device", so older clients keep working unchanged.
@@ -176,8 +176,8 @@ GET /session/start/Full_System_2026-10-08T17%3A00%3A00.000Z?is_test_session=true
 
 | Return value | Example | Used for |
 |---|---|---|
-| capture filter | `{"imu/106", "camera/113_front", "robot/main"}` | the ingest gate — which messages are accepted |
-| deploy plan | `{"edge": ["camera-front", "imu-106"]}` | which Swarm services to run, per stack |
+| capture filter | `{"imu/106", "camera/114_cam1", "robot/main"}` | the ingest gate — which messages are accepted |
+| deploy plan | `{"edge": ["camera-cam1", "imu-106"]}` | which Swarm services to run, per stack |
 
 It validates **before anything changes**: an empty list or an unknown key raises an error, and `start_session` resolves the selection *before* creating the session row, so a bad request leaves no half-started session behind. `None` (no selection) returns `(None, None)` — no catalog lookup at all.
 
@@ -194,7 +194,7 @@ Then, in order:
 1. Resolve and validate the selection.
 2. `db.create_session(..., devices=filter)` — the selection is saved in `session.devices` (JSONB; `NULL` = every device).
 3. `set_capture(RECORD, session_id, devices=filter)` — the gate opens *before* devices start, so their first messages are stored.
-4. Deploy with `stack_env(RECORD)`. This is **skipped** only if we were already monitoring with the same selection **and** the stacks were deployed with the same settings (`deployed_env`). By default the settings differ (the IMUs' PLC trigger is off while monitoring and on for a session), so starting from Monitor redeploys, which restarts only the IMU services.
+4. Deploy with `stack_env(RECORD)`. This is **skipped** only if we were already monitoring with the same selection **and** the stacks were deployed with the same settings (`deployed_env`). By default the settings differ (the IMUs' PLC trigger is off while monitoring and on for a session), so starting from Monitor redeploys, which restarts the IMU and camera services. After a PLC stop with [Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running) the stacks already run with the recording settings, so the next start with the same selection skips it.
 5. If a deploy fails → the gate closes and the session is ended (rolled back).
 
 **`deploy_managed_stacks(plan)`** makes one call per managed stack, in parallel:
@@ -246,7 +246,8 @@ stacks:
     stack_name: edge
     deploy_flags: ["--resolve-image", "never"]
     env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S,
-                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH]
+                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH,
+                    CAMERA_EDGE_SAVE_FRAMES, CAMERA_EDGE_SAVE_ANNOTATED]
 ```
 
 The URL's `{name}` must be a key here, or the request gets a `404`. `stack_name` is the Swarm stack namespace (services become `edge_<service>`). `--resolve-image never` makes Swarm use the image tags already present on each Pi instead of contacting a registry. `env_overrides` lists the only variables a deploy request may set in its `env`; anything else gets `400`. This keeps `fastapi-app` from changing hostnames, broker addresses or other infrastructure values. The file is re-read on every request — but it's a single-file bind mount, so if an editor *replaces* the file instead of editing it in place, the container keeps seeing the old copy until `stack-controller` is restarted.
@@ -270,7 +271,7 @@ Deploy and remove take a **per-stack lock**: a second deploy/remove for the same
 
 ### What a selective deploy actually runs
 
-For `POST /stacks/edge/deploy` with `{"services": ["imu-106", "camera-front"]}`:
+For `POST /stacks/edge/deploy` with `{"services": ["imu-106", "camera-cam1"]}`:
 
 1. **Validate** — an empty list → `400` ("remove the stack instead"); a name not in the compose file → `400` listing the unknown names. Nothing is run.
 2. **Build the environment** — `os.environ` overlaid with `deploy/.env`, then with the request's `env` (after checking it against `env_overrides`). This matters because `docker stack deploy` interpolates `${VAR}` **from the environment of the process that runs it**, not from a `.env` file beside the compose file.
@@ -289,7 +290,7 @@ A deploy with **no body** is the same minus steps 1, 3 and 5: the original `/sta
 
 ### Removing
 
-`POST /stacks/edge/remove` runs `docker stack rm edge` (60 s timeout). That returns as soon as Swarm deletes the services, but the containers on the Pis take a few more seconds to stop (about 4 s on the lab Pis). So the remove then polls the stack's tasks (`docker_ops.live_tasks()`, every 0.5 s) until none is still up on a Ready node, for at most `REMOVE_WAIT_S` (30 s). Tasks on a node that's down are skipped, since they can't be waited for. The reply says `teardown_confirmed: true`, or `false` with `still_running` listing `task@node` if it gave up or couldn't ask Docker; the stack is removed either way, and `fastapi-app` shows a warning. While this runs, `GET /status` says `removing`. `stop_session` and `/listen/stop` call this, then `stop_session` waits for the ingestion queues to drain.
+`POST /stacks/edge/remove` runs `docker stack rm edge` (60 s timeout). That returns as soon as Swarm deletes the services, but the containers on the Pis take a few more seconds to stop (about 4 s on the lab Pis). So the remove then polls the stack's tasks (`docker_ops.live_tasks()`, every 0.5 s) until none is still up on a Ready node, for at most `REMOVE_WAIT_S` (30 s). Tasks on a node that's down are skipped, since they can't be waited for. The reply says `teardown_confirmed: true`, or `false` with `still_running` listing `task@node` if it gave up or couldn't ask Docker; the stack is removed either way, and `fastapi-app` shows a warning. While this runs, `GET /status` says `removing`. `stop_session` and `/listen/stop` call this, then `stop_session` waits for the ingestion queues to drain. A PLC stop with *Keep edge running* on skips it and leaves the stacks up ([Keep edge running](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running)).
 
 ### Status
 
@@ -306,7 +307,7 @@ A deploy with **no body** is the same minus steps 1, 3 and 5: the original `/sta
 
 Once `docker stack deploy` hands the service specs to the manager, Swarm takes over:
 
-- **Placement.** IMU services are pinned by hostname (`node.hostname == ${IMU_106_HOSTNAME}` → `RPIIMUJ1`, …); cameras by node label (`node.labels.camera == front` → `RPiCamFront`, `== side` → `CameraPi2`, `== cam3` → `RPICAM3`). A service whose constraint matches no node stays at `0/1` with "no suitable node" in `docker service ps`.
+- **Placement.** IMU services are pinned by hostname (`node.hostname == ${IMU_106_HOSTNAME}` → `RPIIMUJ1`, …); cameras by node label (`node.labels.camera == cam1` → `RPICAM1`, `== cam2` → `RPICAM2`, `== cam3` → `RPICAM3`, `== cam4` → `RPICAM4`). A service whose constraint matches no node stays at `0/1` with "no suitable node" in `docker service ps`.
 - **Task lifecycle.** Each service gets one task (`replicas: 1`): `new → pending → assigned → accepted → preparing → starting → running`. Because every edge service has a **healthcheck**, Swarm keeps the task in *starting* until the first check passes. Checks run every **1 s** during the warm-up (`start_interval`, `start_period`: 15 s for IMUs, 30 s for cameras, during which failures don't count) and every **10 s** after (`interval`). This is the delay you see as **starting** in the dashboard. Docker older than 25 (`RPIIMUJ3`) ignores `start_interval` and checks every 10 s from the start.
 - **Restarts.** IMUs restart `on-failure`, cameras on `any` exit.
 
@@ -315,7 +316,7 @@ Useful commands on the AMS host:
 ```bash
 docker stack services edge                        # replicas per service, e.g. edge_imu-106 1/1
 docker service ps edge_imu-106 --no-trunc         # task history, node, and errors
-docker service logs edge_camera-front --since 5m  # the container's output, from the manager
+docker service logs edge_camera-cam1 --since 5m  # the container's output, from the manager
 docker node ls                                    # are all Pis Ready/Active?
 ```
 

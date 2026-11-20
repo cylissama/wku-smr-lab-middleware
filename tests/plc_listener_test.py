@@ -223,6 +223,106 @@ class PLCAutoStopTests(unittest.IsolatedAsyncioTestCase):
         self.db.end_session.assert_awaited_once()
         self.remove.assert_awaited_once()
 
+    async def test_keep_edge_running_leaves_the_stacks_up_after_a_plc_stop(self):
+        m.capture.set(CaptureMode.RECORD, session_id=7, devices={"imu/106"})
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
+            result = await m.stop_session_from_plc()
+            capture = await m.get_capture()
+
+        self.assertTrue(result["success"])
+        self.remove.assert_not_awaited()
+        self.db.end_session.assert_awaited_once()
+        await m.backup_task
+        m.try_backup.assert_awaited_once()
+        # Monitored with the recorded selection, armed for the next session
+        self.assertEqual((m.capture.mode, m.capture.devices), (CaptureMode.MONITOR, {"imu/106"}))
+        self.assertTrue(capture["standby"])
+
+    # The whole back-to-back flow, as the dashboard drives it: Start, robot run,
+    # Db_Stop (edge kept up), Start again in standby -> a new session id on the
+    # same stacks, and the next run's data is queued under it
+    async def test_keep_edge_running_start_in_standby_opens_a_new_session(self):
+        from tests.capture_test import IMU_PAYLOAD, drain
+        stack = AsyncMock(return_value={"success": True})
+        self.db.current_session_id = None
+        ids = iter([563, 564])
+
+        async def fake_create(**kw):
+            self.db.current_session_id = next(ids)
+            return self.db.current_session_id
+
+        async def fake_end():
+            self.db.current_session_id = None
+
+        self.db.create_session = AsyncMock(side_effect=fake_create)
+        self.db.end_session = AsyncMock(side_effect=fake_end)
+
+        drain(m.imu_queue)
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False), \
+             patch.object(m, "call_stack_controller", stack), \
+             patch.object(m, "resolve_selection", AsyncMock(return_value=(None, None))), \
+             patch.object(m, "run_param_defaults", AsyncMock(return_value={})), \
+             patch.object(m, "deployed_env", None):
+            first = await m.start_session("Full_System_a", session_label="Full System", is_test_session=False)
+            deploys_after_first = stack.await_count
+
+            await m.stop_session_from_plc()                       # robot finished
+            standby, status = (await m.get_capture())["standby"], await m.get_running_session()
+
+            await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)   # run in standby: not stored
+            in_standby = drain(m.imu_queue)
+
+            second = await m.start_session("Full_System_b", session_label="Full System", is_test_session=False)
+            await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)   # next run
+            queued = drain(m.imu_queue)
+
+        self.assertEqual((first["id"], second["id"]), (563, 564))
+        self.assertTrue(standby)
+        self.assertFalse(status["data"])            # dashboard: no active session, Start enabled
+        self.assertEqual(in_standby, [])
+        self.assertEqual(stack.await_count, deploys_after_first)   # no remove, no redeploy
+        self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 564))
+        self.assertEqual([q["session_id"] for q in queued], [564])
+
+    async def test_keep_edge_running_manual_stop_still_tears_down(self):
+        m.capture.set(CaptureMode.RECORD, session_id=8)
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
+            result = await m.stop_session()
+            standby = m.edge_standby
+
+        self.assertTrue(result["success"])
+        self.remove.assert_awaited_once()
+        self.assertEqual(m.capture.mode, CaptureMode.IDLE)
+        self.assertFalse(standby)
+
+    async def test_button_right_after_a_kept_plc_stop_says_already_stopped(self):
+        m.capture.set(CaptureMode.RECORD, session_id=7)
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False):
+            await m.stop_session_from_plc()
+            result = await m.stop_session()
+
+        self.assertTrue(result["already_stopped"])
+        self.remove.assert_not_awaited()
+        self.db.end_session.assert_awaited_once()
+        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
+
+    async def test_keep_edge_running_db_down_still_keeps_the_stacks(self):
+        m.capture.set(CaptureMode.RECORD, session_id=9)
+        self.db.end_session = AsyncMock(side_effect=ConnectionRefusedError("db down"))
+
+        with patch.object(m, "run_overrides", {"KEEP_EDGE_RUNNING": True}), patch.object(m, "edge_standby", False), \
+             patch("fast_server.main.pending_session_end", None):
+            result = await m.stop_session_from_plc()
+            standby = m.edge_standby
+
+        self.assertTrue(result["degraded"])
+        self.remove.assert_not_awaited()
+        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
+        self.assertTrue(standby)
+
     async def test_button_stop_still_works_normally(self):
         m.capture.set(CaptureMode.RECORD, session_id=8)
 

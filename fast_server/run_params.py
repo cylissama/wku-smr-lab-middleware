@@ -19,6 +19,11 @@ PARAMS: dict[str, dict[str, Any]] = {
         "label": "Wait for PLC start", "group": "plc", "type": "bool", "edge": False,
         "help": "When recording, the IMUs and cameras start sending on the PLC's Data_Start. Monitoring never waits.",
     },
+    "KEEP_EDGE_RUNNING": {
+        "label": "Keep edge running", "group": "plc", "type": "bool", "edge": False,
+        "help": "When the PLC's Db_Stop ends a session, the IMUs and cameras stay up waiting for the next "
+                "Data_Start, so the next session starts without a redeploy. A manual Stop still takes them down.",
+    },
     "IMU_PLC_MAX_RUN_S": {
         "label": "Max PLC run", "group": "imu", "type": "int", "min": 30, "max": 3600, "unit": "s",
         "edge": True, "help": "IMUs stop sending if Db_Stop hasn't come by then",
@@ -27,6 +32,18 @@ PARAMS: dict[str, dict[str, Any]] = {
         "label": "Simulated PLC IP", "group": "plc", "type": "ip", "edge": False, "monitor_only": True,
         "help": "Start Monitoring with a stand-in PLC (a Pi): IMUs and cameras wait for its Data_Start. "
                 "Empty or 0 = stream right away. Recording always uses the real PLC.",
+    },
+    # camera_edge's CAMERA_SAVE_FRAMES / CAMERA_SAVE_ANNOTATED, renamed in
+    # deploy/swarm-edge-nodes.yml so they aren't camera-processor's (AMS) flags
+    "CAMERA_EDGE_SAVE_FRAMES": {
+        "label": "Save frames on Pi", "group": "camera", "type": "bool", "edge": True,
+        "help": "Camera Pis keep every raw frame on their SD card. Only with on-Pi (local) processing; "
+                "camera-processor on the AMS keeps its own copy.",
+    },
+    "CAMERA_EDGE_SAVE_ANNOTATED": {
+        "label": "Save annotated on Pi", "group": "camera", "type": "bool", "edge": True,
+        "help": "Camera Pis keep frames with the detected markers drawn on their SD card. "
+                "Only with on-Pi (local) processing.",
     },
 }
 

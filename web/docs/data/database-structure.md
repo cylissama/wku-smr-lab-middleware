@@ -14,7 +14,7 @@
 
 ## 1. Overview
 
-The database captures synchronized multi-modal sensor data (IMU readings, marker/AprilTag-style image detections, and robot arm pose) collected across recording **sessions** from a set of registered **devices**.
+The database captures synchronized multi-modal sensor data (IMU readings, ArUco marker detections from the cameras, and robot arm pose) collected across recording **sessions** from a set of registered **devices**.
 
 - `device` — registry of every physical sensor/device in the system.
 - `session_label` — the session types offered in the Start Session dropdown.
@@ -85,7 +85,7 @@ Composite primary key on (`session_id`, `device_id`).
 
 ### 2.5 `image_detection`
 
-Per-frame marker/AprilTag pose detections from camera devices (OpenCV-style rotation/translation vectors).
+Per-frame ArUco marker pose detections from camera devices (OpenCV rotation/translation vectors). Marker IDs and sizes: [ArUco markers](/hardware/aruco-markers). The `tvec` axis order is explained in [Camera nodes](/hardware/camera#notes).
 
 | Column | Type | Nullable | Default | Key | Notes |
 |---|---|---|---|---|---|
@@ -98,7 +98,7 @@ Per-frame marker/AprilTag pose detections from camera devices (OpenCV-style rota
 | `tvec_x` | `double precision` | NO | — | | Translation vector X (**m**) |
 | `tvec_y` | `double precision` | NO | — | | Translation vector Y (**m**) |
 | `tvec_z` | `double precision` | NO | — | | Translation vector Z (**m**) |
-| `image_path` | `text` | NO | — | | Path to the associated captured image |
+| `image_path` | `text` | NO | — | | Always empty today (the frame path stays in camera-processor's run folder) |
 | `recorded_at` | `double precision` | NO | — | | Unix timestamp the detection was recorded |
 | `ingested_at` | `double precision` | NO | — | | Unix timestamp the row was ingested into the DB |
 | `device_id` | `integer` | NO | — | FK → `device.id` | |
@@ -138,7 +138,7 @@ Robot arm joint positions and tool-center-point (TCP) pose.
 | Column | Type | Nullable | Default | Key | Notes |
 |---|---|---|---|---|---|
 | `id` | `bigint` | NO | — | **PK** | |
-| `ts_epoch` | `double precision` | NO | — | | Robot controller clock timestamp (Unix) |
+| `ts_epoch` | `double precision` | NO | — | | Robot controller clock, **packed FANUC time (not Unix)**, 2 s resolution, not NTP-synced. See [Robot Arm → Timestamps](/hardware/robot-arm#timestamps) |
 | `joint_1` | `double precision` | NO | — | | Joint 1 position (**degrees**) |
 | `joint_2` | `double precision` | NO | — | | Joint 2 position (**degrees**) |
 | `joint_3` | `double precision` | NO | — | | Joint 3 position (**degrees**) |
@@ -151,11 +151,11 @@ Robot arm joint positions and tool-center-point (TCP) pose.
 | `w` | `double precision` | NO | — | | TCP orientation (**degrees**) |
 | `p` | `double precision` | NO | — | | TCP orientation (**degrees**) |
 | `r` | `double precision` | NO | — | | TCP orientation (**degrees**) |
-| `recorded_at` | `double precision` | NO | — | | Unix timestamp the sample was recorded |
-| `ingested_at` | `double precision` | NO | — | | Unix timestamp the row was ingested into the DB |
+| `recorded_at` | `double precision` | NO | — | | Unix timestamp (AMS clock, NTP-synced) when `tcp_server` received the line |
+| `ingested_at` | `double precision` | NO | — | | Unix timestamp (AMS clock) when the batch was inserted; shared by every row in the batch |
 | `device_id` | `integer` | NO | — | FK → `device.id` | |
 | `session_id` | `bigint` | NO | — | FK → `session.id` | |
-| `frame_id` | `bigint` | YES | — | | Associated video/capture frame identifier |
+| `frame_id` | `bigint` | YES | — | | Robot's Karel loop counter (restarts at 1 when the program restarts) |
 
 Types are as declared in `db/schema.sql`.
 
@@ -206,7 +206,7 @@ Each measurement table carries a composite `(device_id, recorded_at DESC)` index
 
 ## 5. Notes for Documentation Maintainers
 
-- All `*_at` / `ts_epoch` / `capture_time` fields are stored as raw **Unix timestamps** (`double precision`), not native `timestamp` types — convert on read if human-readable dates are needed.
-- `imu_measurement.capture_time` and `robot`/`image_detection` timestamps originate from different clocks (device vs. ingestion server); expect minor clock drift between `recorded_at` and `capture_time`.
+- All `*_at` / `capture_time` fields are stored as raw **Unix timestamps** (`double precision`), not native `timestamp` types; convert them on read if you need readable dates. `robot.ts_epoch` is the exception: it's a packed FANUC date-time, not Unix (see [Robot Arm → Timestamps](/hardware/robot-arm#timestamps)).
+- `imu_measurement.capture_time` and `robot`/`image_detection` timestamps originate from different clocks (device vs. ingestion server); expect minor clock drift between `recorded_at` and `capture_time`. `robot.ts_epoch` comes from the robot controller's own clock, which isn't NTP-synced and has drifted by tens of seconds; use `robot.recorded_at` to align robot data with other devices.
 - `session.is_test_session` defaults to `true` — production/real sessions must explicitly set this to `false`.
 - Diagram source: generated with `matplotlib` from the four PostgreSQL metadata query results (`information_schema.columns`, `table_constraints`/`key_column_usage`, `pg_indexes`, and `pg_description`).

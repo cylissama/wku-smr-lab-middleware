@@ -137,6 +137,29 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_key["IMU_PLC_MAX_RUN_S"]["default"], 600)
         self.assertTrue(result["editable"])
 
+    async def test_camera_save_flags_default_from_edge_env_and_reach_the_deploy(self):
+        async def fake_request(method, path, body=None):
+            return {"success": True, "env": {"CAMERA_EDGE_SAVE_FRAMES": "true", "CAMERA_EDGE_SAVE_ANNOTATED": "true"}}
+
+        with patch("fast_server.main.stack_controller_request", side_effect=fake_request):
+            by_key = {p["key"]: p for p in (await m.get_parameters())["data"]}
+        self.assertIs(by_key["CAMERA_EDGE_SAVE_FRAMES"]["default"], True)
+        self.assertIs(by_key["CAMERA_EDGE_SAVE_ANNOTATED"]["value"], True)
+
+        m.run_overrides = {"CAMERA_EDGE_SAVE_FRAMES": False, "CAMERA_EDGE_SAVE_ANNOTATED": False}
+        for mode in (CaptureMode.MONITOR, CaptureMode.RECORD):
+            env = m.stack_env(mode)
+            self.assertEqual((env["CAMERA_EDGE_SAVE_FRAMES"], env["CAMERA_EDGE_SAVE_ANNOTATED"]), ("false", "false"))
+
+    def test_swarm_file_maps_camera_save_flags_onto_every_camera(self):
+        services = yaml.safe_load(Path("deploy/swarm-edge-nodes.yml").read_text())["services"]
+        cameras = {name: s for name, s in services.items() if name.startswith("camera-")}
+        self.assertTrue(cameras)
+        for name, service in cameras.items():
+            with self.subTest(name=name):
+                self.assertEqual(service["environment"]["CAMERA_SAVE_FRAMES"], "${CAMERA_EDGE_SAVE_FRAMES:-true}")
+                self.assertEqual(service["environment"]["CAMERA_SAVE_ANNOTATED"], "${CAMERA_EDGE_SAVE_ANNOTATED:-true}")
+
     async def test_put_saves_and_null_resets(self):
         self.assertTrue((await m.put_parameters(m.RunParamsUpdate(values={"IMU_SAMPLE_HZ": 200})))["success"])
         self.assertEqual(run_params.load(m.RUN_PARAMS_PATH)[0], {"IMU_SAMPLE_HZ": 200})
@@ -186,6 +209,24 @@ class ParametersApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result["redeployed"])
         self.assertEqual(self.deploys, [])
+
+    async def test_put_in_edge_standby_redeploys_with_the_record_env(self):
+        # Stacks kept up after a session stay armed for the next one
+        m.capture.set(CaptureMode.MONITOR, devices=None)
+        m.deployed_env = {"IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}
+
+        with patch.object(m, "edge_standby", True):
+            result = await m.put_parameters(m.RunParamsUpdate(values={"IMU_SAMPLE_HZ": 50}))
+            skipped = await m.put_parameters(m.RunParamsUpdate(values={"KEEP_EDGE_RUNNING": True}))
+
+        self.assertTrue(result["redeployed"])
+        self.assertEqual(self.deploys, [{"env": {"IMU_SAMPLE_HZ": "50", "IMU_PLC_TRIGGER": "true", "CAMERA_PLC_TRIGGER": "true"}}])
+        self.assertFalse(skipped["redeployed"])
+
+    async def test_keep_edge_running_defaults_off_and_is_stored_with_the_session(self):
+        params = {p["key"]: p for p in (await m.get_parameters())["data"]}
+        self.assertIs(params["KEEP_EDGE_RUNNING"]["default"], False)
+        self.assertIn("KEEP_EDGE_RUNNING", await m.effective_run_params())
 
     async def test_stack_env_per_mode(self):
         m.run_overrides = {"IMU_SAMPLE_HZ": 200, "IMU_PLC_TRIGGER_ON_RECORD": True}

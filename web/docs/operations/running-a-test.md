@@ -32,7 +32,7 @@ The IMU and camera Pis must be powered on and in the Swarm. On the AMS host, `do
 Each IMU Pi also runs the `imu-hw` host service. If an IMU starts but never sends, check it on that Pi:
 
 ```bash
-ssh admin@192.168.1.106          # RPIIMUJ1; .107–.110 for J2–J5
+ssh admin@192.168.1.106          # RPIIMUJ1; .107–.111 for J2–J6
 sudo systemctl status imu-hw --no-pager
 curl --unix-socket /run/imu-hw/imu.sock http://localhost/v1/readyz   # "ready": true
 ```
@@ -73,13 +73,13 @@ Devices left out of the current selection are dimmed in the graphics.
 
 ### Run parameters
 
-The **Run Parameters** card (right margin on wide screens, under Devices otherwise) shows the IMU sample rate, whether the IMUs wait for the PLC, and the IMU max run time. Values stay set from the previous run, so check them. See [Run parameters](/operations/run-parameters).
+The **Run Parameters** card (right margin on wide screens, under Devices otherwise) shows the IMU sample rate and max run time, whether the IMUs and cameras wait for the PLC, Keep edge running, the simulated PLC IP, and whether the camera Pis save frames. Values stay set from the previous run, so check them. See [Run parameters](/operations/run-parameters).
 
 Pick the **session type** in the dropdown, and tick **Fake Data** if this is a test rather than real data.
 
 ## 4. (Optional) Monitor first
 
-To check that devices are publishing without recording anything, click **Start Monitoring**. This brings the selected devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot boxes (message rate plus latest values). Nothing is written to the database. While monitoring, the IMUs stream right away; they don't wait for the robot's PLC.
+To check that devices are publishing without recording anything, click **Start Monitoring**. This brings the selected devices up and shows one cyan `[live]` line per device per second in the Camera / IMU / Robot boxes (message rate plus latest values). Nothing is written to the database. While monitoring, the IMUs and cameras stream right away; they don't wait for the robot's PLC (unless a Simulated PLC IP is set). Cameras only send rows for frames with a marker in view.
 
 From here, click **Start Session** to record, or **Stop Monitoring** to take the devices back down.
 
@@ -97,7 +97,7 @@ The robot is started manually by the operator in the downstairs lab. Coordinate 
 
 ## 7. Stop
 
-With PLC auto stop on (the lab default), you don't have to do anything. When the robot finishes, the PLC pulses `Db_Stop` and the session stops itself. The dashboard switches to **Idle** within about 5 s. See [PLC auto stop](/operations/plc-auto-stop).
+With PLC auto stop on (the lab default), you don't have to do anything. When the robot finishes, the PLC pulses `Db_Stop` and the session stops itself. The dashboard switches to **Idle** (or **Edge standby** with Keep edge running on) within about 5 s. See [PLC auto stop](/operations/plc-auto-stop).
 
 Otherwise, click **Stop Session**. Either way, the AMS:
 
@@ -108,6 +108,8 @@ Otherwise, click **Stop Session**. Either way, the AMS:
 5. starts a database backup in the background (about 20 s; the next session can start meanwhile)
 
 Start Session stays greyed out until all of this but the backup is done, so you can start the next run as soon as it's enabled again.
+
+**Running several sessions back to back?** Turn on **Keep edge running** in Run Parameters. After a PLC stop, step 2 is skipped: the devices stay up (the badge shows **Edge standby**) and the next Start Session doesn't redeploy them, so the robot can go right away. A manual Stop still removes them, and **Take Edge Down** removes them when you're done. See [Back-to-back sessions](/operations/plc-auto-stop#back-to-back-sessions-keep-edge-running).
 
 ## 8. Review the data
 

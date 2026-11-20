@@ -1,7 +1,7 @@
 // The always-on broker stack on the AMS host (docker-compose.yml).
 model {
 
-  ams = zone 'AMS host "IIoT"' {
+  ams = zone 'AMS host "AMS"' {
     description 'Mini PC at 192.168.2.100. Runs docker-compose.yml (always on) and is the Docker Swarm manager for the edge Pis.'
     link /docs/hardware/data-broker-mini-pc 'AMS host'
     link /docs/docker/compose 'Compose'

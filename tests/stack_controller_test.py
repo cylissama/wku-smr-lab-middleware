@@ -26,14 +26,14 @@ services:
           - node.hostname == ${IMU_106_HOSTNAME}
     environment:
       MQTT_TOPIC: imu/${IMU_106_DEVICE_ID}
-  camera-front:
+  camera-cam1:
     image: camera-edge:latest
     deploy:
       labels:
         - smr.category=camera
-        - smr.device=${CAMERA_FRONT_DEVICE_ID:-999}
+        - smr.device=${CAMERA_CAM1_DEVICE_ID:-999}
       placement:
-        constraints: [node.labels.camera == front]
+        constraints: [node.labels.camera == cam1]
   helper:
     image: busybox
 networks:
@@ -97,7 +97,7 @@ class StackControllerTests(unittest.TestCase):
 
     NODES = [
         {"hostname": "RPIIMUJ1", "addr": "192.168.1.106", "labels": {}, "state": "ready"},
-        {"hostname": "RPiCamFront", "addr": "192.168.1.113", "labels": {"camera": "front"}, "state": "down"},
+        {"hostname": "RPICAM1", "addr": "192.168.1.113", "labels": {"camera": "cam1"}, "state": "down"},
         {"hostname": "AMS", "addr": "192.168.2.100", "labels": {}, "state": "ready"},
     ]
 
@@ -109,8 +109,8 @@ class StackControllerTests(unittest.TestCase):
         self.assertEqual(resp.json()["services"], [
             {"service": "imu-106", "category": "imu", "device_label": "106", "joint": "J1",
              "node": "RPIIMUJ1", "ip": "192.168.1.106"},
-            {"service": "camera-front", "category": "camera", "device_label": "999", "joint": None,
-             "node": "RPiCamFront", "ip": "192.168.1.113"},
+            {"service": "camera-cam1", "category": "camera", "device_label": "999", "joint": None,
+             "node": "RPICAM1", "ip": "192.168.1.113"},
             {"service": "helper", "category": None, "device_label": None, "joint": None, "node": None, "ip": None},
         ])
 
@@ -122,13 +122,13 @@ class StackControllerTests(unittest.TestCase):
         self.assertEqual((imu["joint"], imu["node"], imu["ip"]), ("J1", None, None))
 
     def test_placement_node_needs_exactly_one_match(self):
-        nodes = self.NODES + [{"hostname": "Other", "addr": "192.168.1.200", "labels": {"camera": "front"}}]
+        nodes = self.NODES + [{"hostname": "Other", "addr": "192.168.1.200", "labels": {"camera": "cam1"}}]
         spec = lambda *c: {"deploy": {"placement": {"constraints": list(c)}}}
 
         self.assertEqual(sc.placement_node(spec("node.hostname == AMS"), {}, nodes)["addr"], "192.168.2.100")
         # two nodes carry the label: ambiguous
-        self.assertIsNone(sc.placement_node(spec("node.labels.camera == front"), {}, nodes))
-        self.assertEqual(sc.placement_node(spec("node.labels.camera == front", "node.hostname != Other"), {}, nodes)["hostname"], "RPiCamFront")
+        self.assertIsNone(sc.placement_node(spec("node.labels.camera == cam1"), {}, nodes))
+        self.assertEqual(sc.placement_node(spec("node.labels.camera == cam1", "node.hostname != Other"), {}, nodes)["hostname"], "RPICAM1")
         self.assertIsNone(sc.placement_node(spec("node.hostname == Gone"), {}, nodes))
         self.assertIsNone(sc.placement_node(spec("node.role == worker"), {}, nodes))
         self.assertIsNone(sc.placement_node({}, {}, nodes))

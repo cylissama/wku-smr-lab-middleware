@@ -18,7 +18,7 @@
 | `ntp` | `cturra/ntp:latest` | Shared time source (see [Automations](/docker/automations)). |
 | `pgadmin` | `dpage/pgadmin4:9` | Multi-user pgAdmin for querying the database (see [Accessing the database](/data/accessing-database)). |
 
-This stack is driven by the `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), and the published image tags (`SMR_FASTAPI_IMAGE`, `SMR_WEB_IMAGE`, `SMR_TCP_IMAGE`). The edge nodes have their own, separate file; see below.
+This stack is driven by the `.env` file in the repo root — database credentials, ports, batching tunables (`BATCHES`, `B_TIMEOUT`, `QUEUE_SIZE`), PLC auto stop, and camera-processor's settings. The images are built on the AMS host from this checkout, not pulled. The edge nodes have their own, separate file; see below.
 
 ### Two `.env` files
 
@@ -28,14 +28,14 @@ There are two `.env` files on the AMS host. They configure different stacks, are
 | --- | --- | --- |
 | Path | `.env` (repo root, next to `docker-compose.yml`) | `deploy/.env` (next to `swarm-edge-nodes.yml`) |
 | Template | `.env.example` | `deploy/.env.example` |
-| Configures | the always-on stack: `fastapi-app`, `tcp`, `web`, `stack-controller`, `pgadmin` | the IMU and camera services on the Pis |
+| Configures | the always-on stack: `fastapi-app`, `tcp`, `camera-processor`, `web`, `stack-controller`, `pgadmin` | the IMU and camera services on the Pis |
 | Read by | `docker compose` (`env_file` / `${VAR}`) | `stack-controller` on every edge deploy (mounted at `/stacks/.env`), or your shell for a manual `docker stack deploy` |
 | Takes effect | after recreating the container (`docker compose up -d --force-recreate <service>`) | on the next deploy (Start Monitoring / Start Session); nothing to restart |
-| Examples | `DB_*`, ports, `BATCHES`, `PLC_AUTO_STOP`, `IMU_PLC_TRIGGER_ON_RECORD`, `STACK_CONTROLLER_TOKEN` | `IMU_10x_DEVICE_ID`, `IMU_SAMPLE_HZ`, `CAMERA_*`, `MQTT_BROKER_IP`, `IMU_PLC_TRIGGER`, `CAMERA_PLC_TRIGGER` |
+| Examples | `DB_*`, ports, `BATCHES`, `PLC_AUTO_STOP`, `IMU_PLC_TRIGGER_ON_RECORD`, `KEEP_EDGE_RUNNING`, `CAMERA_SAVE_*`, `STACK_CONTROLLER_TOKEN` | `IMU_10x_DEVICE_ID`, `IMU_SAMPLE_HZ`, `CAMERA_CAM<N>_*`, `CAMERA_MARKER_LENGTHS_M`, `CAMERA_EDGE_SAVE_*`, `MQTT_BROKER_IP`, `IMU_PLC_TRIGGER`, `CAMERA_PLC_TRIGGER` |
 
 The PLC trigger is the easy one to mix up. Whether a session waits for the PLC is set by `IMU_PLC_TRIGGER_ON_RECORD` in the **root** `.env`. fastapi-app uses it to choose the `IMU_PLC_TRIGGER` and `CAMERA_PLC_TRIGGER` values it sends with each edge deploy, and those values replace the matching lines in `deploy/.env`. So editing `IMU_PLC_TRIGGER` or `CAMERA_PLC_TRIGGER` in `deploy/.env` changes nothing for monitoring or sessions; it only applies to a manual `docker stack deploy`. See [PLC auto stop](/operations/plc-auto-stop#imu-plc-trigger-monitor-vs-session).
 
-Some edge values (`IMU_SAMPLE_HZ`, `IMU_PLC_MAX_RUN_S`, and `IMU_PLC_TRIGGER_ON_RECORD` from the root file) are only **defaults** now: the dashboard's [Run Parameters](/operations/run-parameters) panel can override them per run, and those overrides win over the `.env` line.
+Some values (`IMU_SAMPLE_HZ`, `IMU_PLC_MAX_RUN_S` and `CAMERA_EDGE_SAVE_*` from `deploy/.env`, `IMU_PLC_TRIGGER_ON_RECORD` and `KEEP_EDGE_RUNNING` from the root file) are only **defaults** now: the dashboard's [Run Parameters](/operations/run-parameters) panel can override them per run, and those overrides win over the `.env` line.
 
 ### `mqtt-broker`
 
@@ -53,7 +53,7 @@ A third volume, `fastapi_state:/state`, is a normal local volume. It holds `run_
 
 ### `web`
 
-Built with a large set of build **args**, because Vite bakes environment values into the static bundle at build time rather than reading them at runtime: `HOST_IP`, `FASTAPI_PORT`, `VITE_API_URL`, `VITE_WS_URL`, `VITE_AI_URL`, `VITE_TWINS_URL`, `VITE_ROBOT_CAMERA_URL`, `VITE_DB_GUI_URL`, `VITE_PORTAINER_URL` (and the non-`VITE_` `ROBOT_CAMERA_URL`, `DB_GUI_URL`, `PORTAINER_URL` fallbacks). This means **the frontend must be rebuilt** any time one of these values changes — see the "SOP: Mockup to Production Cutover" document in the dashboard's Info library for the full list of environment-driven service links.
+Built with a large set of build **args**, because Vite bakes environment values into the static bundle at build time rather than reading them at runtime: `HOST_IP`, `FASTAPI_PORT`, `VITE_API_URL`, `VITE_WS_URL`, `VITE_AI_URL`, `VITE_TWINS_URL`, `VITE_ROBOT_CAMERA_URL`, `VITE_DB_GUI_URL`, `VITE_PORTAINER_URL` (and the non-`VITE_` `ROBOT_CAMERA_URL`, `DB_GUI_URL`, `PORTAINER_URL` fallbacks, plus `DIGITAL_TWIN_IP`/`DIGITAL_TWIN_PORT`, which build the Digital Twin button's URL when `VITE_TWINS_URL` is blank). This means **the frontend must be rebuilt** any time one of these values changes — see the "SOP: Mockup to Production Cutover" document in the dashboard's Info library for the full list of environment-driven service links.
 
 nginx inside this container (`web/nginx.conf`) does four things:
 
@@ -76,7 +76,7 @@ The lab's pgAdmin, moved off the NAS into this stack. Published on `PGADMIN_PORT
 
 ### `ntp`
 
-Runs with `SYS_NICE`/`SYS_TIME` capabilities and mounts the host's `/etc/localtime` read-only. See [Automations](/docker/automations) for why this exists.
+Runs with `SYS_NICE`/`SYS_TIME` capabilities and mounts the host's `/etc/localtime` read-only. chrony runs with `-x`, so it serves time on UDP 123 but doesn't set the AMS clock (the host's `systemd-timesyncd` does). See [Automations](/docker/automations#time-synchronization).
 
 ## Health, restarts and logs
 

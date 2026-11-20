@@ -52,21 +52,30 @@ Each sample is a single newline-terminated line of comma-separated values, in th
 
 | Position | Field | Type | Notes |
 |---|---|---|---|
-| 0 | `frame_id` | Integer | Frame/sequence number |
-| 1 | `ts_epoch` | Float (epoch s) | Robot controller's own clock at time of sample |
-| 2 | `ts_string` | String | Human-readable timestamp (not currently parsed into a usable value — see note below) |
+| 0 | `frame_id` | Integer | Karel loop counter (`count`) |
+| 1 | `ts_epoch` | Integer | Robot controller clock from Karel `GET_TIME`: **packed FANUC date-time, not epoch seconds**, 2 s resolution, not NTP-synced. See [Robot Arm → Timestamps](/hardware/robot-arm#timestamps) |
+| 2 | `ts_string` | String | Same time as text (`CNV_TIME_STR`); not stored |
 | 3–8 | `joint_1`…`joint_6` | Float | Joint angles/positions |
 | 9–11 | `x`, `y`, `z` | Float | TCP (tool center point) position |
 | 12–14 | `w`, `p`, `r` | Float | TCP orientation (yaw/pitch/roll) |
 
 Example line:
 ```
-1,1710000000.0,2024-03-09T12:00:00,0.1,0.2,0.3,0.4,0.5,0.6,10.0,20.0,30.0,1.0,0.0,0.0
+1, 1567387795,12-NOV-26 14:04 , .001552, .001158, -.000283, .000938, -90.000603, -.000223, 1783.117, -2205.963, 928.994, 179.999, .000, .001
 ```
+
+(A real line from session 544. The robot also sends a header line `count,ts_int,ts_str,J1,...` on connect, which fails to parse and is logged as a parse error.)
 
 This maps directly onto the `robot` table columns described in [Robot Arm](/hardware/robot-arm) and [Database structure](/data/database-structure), plus `recorded_at`/`ingested_at`/`device_id`/`session_id` added at insert time.
 
-> **Note:** the code also attempts to parse field 0 as an `%m/%d/%Y %H:%M`-formatted date string into a second `ts_epoch` value, but that result is discarded — the `ts_epoch` actually stored comes from field 1. Worth cleaning up or documenting further if field 0's format ever needs to carry real meaning.
+`tcp_server` adds two timestamps from the AMS host clock, which is NTP-synced:
+
+- `recorded_at`: set as each line arrives (`datetime.now(timezone.utc)` in the read loop).
+- `ingested_at`: set once per batch in `insert_robot_batch()` when the batch is written, so all rows in a batch share it.
+
+`ts_epoch` is stored unchanged. For cross-device timing use `recorded_at` (see [Robot Arm → Timestamps](/hardware/robot-arm#timestamps)).
+
+> **Note:** the read loop also runs `strptime(parts[0], "%m/%d/%Y %H:%M")` with a US/Eastern conversion into a local `ts_epoch`. Field 0 is the frame counter, so this always fails, and nothing uses the result. The tcp image also has no tzdata, so `ZoneInfo("US/Eastern")` would fail anyway. The stored `ts_epoch` is field 1 as-is. This block is dead code and can be removed.
 
 ## Failure modes
 

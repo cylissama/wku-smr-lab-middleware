@@ -26,6 +26,7 @@ The system centers on a containerized **Active Middleware Services** or **AMS** 
 | MQTT broker (Eclipse Mosquitto) | Receives IMU and camera device messages |
 | FastAPI server | Ingestion, session control, backups, WebSocket broadcast |
 | TCP server | Robot telemetry ingestion (CSV over raw TCP) |
+| Camera processor | ArUco marker detection and pose for the camera Pis' frames ([details](/docker/camera-processor)) |
 | PostgreSQL | Sessioned telemetry storage, hosted on a Synology NAS |
 | React + Vite dashboard | Live monitoring UI, session control, document/SOP library ([tour](/overview/dashboard)) |
 | stack-controller | Deploys/removes the edge Swarm stack for `fastapi-app`; container health, watchdog, logs |

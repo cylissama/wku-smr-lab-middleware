@@ -225,6 +225,14 @@ run_overrides: dict[str, Any] = {}
 # The env the managed stacks were last deployed with (None if unknown or removed)
 deployed_env: dict[str, str] | None = None
 
+# True while the edge stacks were kept up after a PLC-stopped session
+# (KEEP_EDGE_RUNNING): capture is MONITOR, but the stacks still run with the
+# recording settings, armed for the next session. Set via set_capture().
+edge_standby = False
+
+def keep_edge_running() -> bool:
+    return run_overrides.get("KEEP_EDGE_RUNNING", env_flag("KEEP_EDGE_RUNNING", False))
+
 # Edge-stack settings for a deploy in this capture mode (stack-controller only
 # accepts the variables a stack lists under env_overrides in stacks.yml): the
 # edge run parameters, plus IMU_PLC_TRIGGER and CAMERA_PLC_TRIGGER. Monitoring
@@ -854,8 +862,12 @@ async def push_capture_to_tcp() -> bool:
         loggers.log_system_logger(f"Could not push capture state to tcp_server: {e}", True)
         return False
 
-# Changes the capture state and propagates it to tcp_server
-async def set_capture(mode: CaptureMode, session_id: int | None = None, devices: set[str] | None = None) -> None:
+# Changes the capture state and propagates it to tcp_server. standby: the
+# stacks were kept up from a session (see edge_standby); any other change clears it.
+async def set_capture(mode: CaptureMode, session_id: int | None = None, devices: set[str] | None = None,
+                      standby: bool = False) -> None:
+    global edge_standby
+    edge_standby = standby and mode == CaptureMode.MONITOR
     capture.set(mode, session_id=session_id, devices=devices)
     loggers.log_system_logger(f"Capture mode -> {mode.value} (session {session_id})")
     await push_capture_to_tcp()
@@ -864,7 +876,8 @@ async def set_capture(mode: CaptureMode, session_id: int | None = None, devices:
 @app.get("/capture")
 async def get_capture() -> dict[str, Any]:
     # busy: a start/stop/redeploy holds session_lock, so another would wait
-    return {**capture.to_dict(), "busy": session_lock.locked(), "edge": edge_ready}
+    # standby: monitoring because the stacks were kept up after a session
+    return {**capture.to_dict(), "busy": session_lock.locked(), "edge": edge_ready, "standby": edge_standby}
 
 # Each run parameter's default: deploy/.env's value for the edge ones (via
 # stack-controller; None if it can't be read), this process's env for the other
@@ -873,6 +886,7 @@ async def run_param_defaults() -> dict[str, Any]:
     env = {k: v for listing in listings for k, v in (listing.get("env") or {}).items()}
 
     defaults: dict[str, Any] = {"IMU_PLC_TRIGGER_ON_RECORD": env_flag("IMU_PLC_TRIGGER_ON_RECORD", True),
+                                "KEEP_EDGE_RUNNING": env_flag("KEEP_EDGE_RUNNING", False),
                                 "MONITOR_PLC_IP": ""}
     for key in run_params.EDGE_PARAMS:
         try:
@@ -950,13 +964,14 @@ async def put_parameters(body: RunParamsUpdate) -> dict[str, Any]:
             loggers.log_event(f"Run parameters changed: {', '.join(changes)}", category="parameters")
             await broadcast_message(misc_manager, f"Run parameters changed: {', '.join(changes)}", "info")
 
-        monitor_env = stack_env(CaptureMode.MONITOR)
-        if capture.mode != CaptureMode.MONITOR or deployed_env == monitor_env:
+        # Stacks kept up after a session stay armed for the next one
+        target_env = stack_env(CaptureMode.RECORD if edge_standby else CaptureMode.MONITOR)
+        if capture.mode != CaptureMode.MONITOR or deployed_env == target_env:
             return {"success": True, "redeployed": False}
 
         try:
             _, plan = await resolve_selection(sorted(capture.devices) if capture.devices is not None else None)
-            results = await deploy_managed_stacks(plan, monitor_env)
+            results = await deploy_managed_stacks(plan, target_env)
             failed = {name: r.get("error") for name, r in results.items() if not r.get("success")}
         except Exception as e:
             failed = {"edge": str(e)}
@@ -1118,6 +1133,7 @@ async def _start_session(
     # (IMU_PLC_TRIGGER), which redeploys and restarts just the affected services
     was_monitoring = capture.mode == CaptureMode.MONITOR
     monitored_devices = capture.devices
+    was_standby = edge_standby
 
     # Prep logs and prepare session id
     try:
@@ -1164,8 +1180,9 @@ async def _start_session(
 
             # Block: a session with no running stacks won't receive any data, so roll it back.
             # Coming from monitoring, its stacks are still up, so go back to that.
+            # (A failed redeploy leaves deployed_env None, so standby can't skip the next one.)
             if was_monitoring:
-                await set_capture(CaptureMode.MONITOR, devices=monitored_devices)
+                await set_capture(CaptureMode.MONITOR, devices=monitored_devices, standby=was_standby)
             else:
                 await set_capture(CaptureMode.IDLE)
             try:
@@ -1179,8 +1196,9 @@ async def _start_session(
             }
 
         # The IMU and camera nodes only see a Data_Start that comes after
-        # they've (re)started, so the robot has to wait for them
-        if record_env["IMU_PLC_TRIGGER"] == "true" and (
+        # they've (re)started, so the robot has to wait for them. Without a
+        # redeploy (e.g. kept running after the last session) they're already waiting.
+        if deploy_results and record_env["IMU_PLC_TRIGGER"] == "true" and (
             selected is None or any(key.startswith(("imu/", "camera/")) for key in selected)
         ):
             await broadcast_message(misc_manager, "IMUs and cameras are (re)starting to wait for the robot's PLC Data_Start -- "
@@ -1197,7 +1215,7 @@ async def _start_session(
         # monitoring, the stacks are still up, so go back to that
         if opened_gate:
             if was_monitoring:
-                await set_capture(CaptureMode.MONITOR, devices=monitored_devices)
+                await set_capture(CaptureMode.MONITOR, devices=monitored_devices, standby=was_standby)
             else:
                 await set_capture(CaptureMode.IDLE)
 
@@ -1218,7 +1236,8 @@ async def stop_session() -> dict[str, Any]:
     async with session_lock:
         # The dashboard learns about a stop it didn't make on its next poll, so a
         # click can land just after the PLC already stopped the session
-        if capture.mode == CaptureMode.IDLE and last_stop and time.monotonic() - last_stop[1] < ALREADY_STOPPED_WINDOW:
+        stopped = capture.mode == CaptureMode.IDLE or edge_standby
+        if stopped and last_stop and time.monotonic() - last_stop[1] < ALREADY_STOPPED_WINDOW:
             session_id, _at, reason = last_stop
             because = f" ({reason})" if reason else ""
             return {"message": f"Session {session_id} was already stopped{because}", "success": True, "already_stopped": True}
@@ -1226,13 +1245,24 @@ async def stop_session() -> dict[str, Any]:
 
 # The stop itself, shared by the button (stop_session) and the PLC
 # (stop_session_from_plc). Callers hold session_lock. reason, if given, is
-# added to the "stopped" log line and dashboard message.
-async def _stop_session(reason: str | None = None) -> dict[str, Any]:
+# added to the "stopped" log line and dashboard message. keep_edge leaves the
+# edge stacks up and ends in MONITOR (edge_standby) instead of IDLE, so the
+# next session needn't redeploy -- only safe when the edge agents stopped
+# sending too (the PLC's Db_Stop), else they'd still be mid-run.
+async def _stop_session(reason: str | None = None, keep_edge: bool = False) -> dict[str, Any]:
   global pending_session_end, last_stop
 
   session_id = capture.session_id
+  devices = capture.devices
   stopped_at = time.time()
   because = f" ({reason})" if reason else ""
+
+  # Where the stop ends up: stacks kept up are monitored with the same selection
+  async def finish() -> None:
+      if keep_edge:
+          await set_capture(CaptureMode.MONITOR, devices=devices, standby=True)
+      else:
+          await set_capture(CaptureMode.IDLE)
 
   try:
 
@@ -1242,7 +1272,7 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
     # session_id is kept while STOPPING so the workers still flush its batches.
     await set_capture(CaptureMode.STOPPING, session_id=capture.session_id, devices=capture.devices)
 
-    remove_results = await remove_managed_stacks()
+    remove_results = {} if keep_edge else await remove_managed_stacks()
     failed_stacks = [name for name, result in remove_results.items() if not result.get("success")]
 
     for name in failed_stacks:
@@ -1273,7 +1303,7 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
         if not is_db_connection_error(e) or session_id is None:
             raise
         pending_session_end = (session_id, stopped_at)
-        await set_capture(CaptureMode.IDLE)
+        await finish()
 
         msg = (f"Session {session_id} stopped{because}, but the database is unreachable ({describe_exc(e)}). "
                f"Its end time will be saved when the database is back; rows still buffered were not stored.")
@@ -1289,7 +1319,7 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
             "stack_removal_failed": failed_stacks or None,
         }
 
-    await set_capture(CaptureMode.IDLE)
+    await finish()
 
     loggers.log_event(f"Session {session_id} stopped{because}", category="session", session_id=session_id)
     loggers.cur_camera_logger.info(f"Camera session ended.")
@@ -1297,6 +1327,11 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
     loggers.cur_robot_logger.info(f"Robot session ended.")
 
     await broadcast_message(misc_manager, f"Session ended with logs successfully{because}")
+    if keep_edge:
+        msg_kept = ("Edge stacks kept running (Keep edge running): they wait for the next PLC Data_Start, "
+                    "so the next session starts without a redeploy. Stop monitoring to take them down.")
+        loggers.log_event(msg_kept, category="session", session_id=session_id)
+        await broadcast_message(misc_manager, msg_kept, "info")
 
     msg = start_stop_backup()
     last_stop = (session_id, time.monotonic(), reason)
@@ -1310,8 +1345,9 @@ async def _stop_session(reason: str | None = None) -> dict[str, Any]:
   except Exception as e:
 
     # Stop was requested, so stop storing even if ending the session failed
-    if capture.mode != CaptureMode.IDLE:
-        await set_capture(CaptureMode.IDLE)
+    # (kept stacks stay monitored, so Stop monitoring can still take them down)
+    if capture.mode != CaptureMode.IDLE and not edge_standby:
+        await finish()
 
     loggers.log_event(f"Failed to stop the current session: {e}", category="session", level=logging.ERROR)
     loggers.cur_camera_logger.error(f"Camera session failed to stop. Error: {e}")
@@ -1386,7 +1422,7 @@ async def stop_session_from_plc() -> dict[str, Any] | None:
         loggers.log_event(f"PLC {PLC_TAG_STOP} pulse (robot finished): stopping session {session_id}",
                           category="session", session_id=session_id)
         await broadcast_message(misc_manager, f"Robot finished (PLC {PLC_TAG_STOP}): stopping session {session_id}", "info")
-        return await _stop_session(reason=f"robot finished, PLC {PLC_TAG_STOP}")
+        return await _stop_session(reason=f"robot finished, PLC {PLC_TAG_STOP}", keep_edge=keep_edge_running())
 
 # Background tasks started at boot -- kept referenced so they aren't GC'd
 _background_tasks: set[asyncio.Task] = set()

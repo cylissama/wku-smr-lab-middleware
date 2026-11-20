@@ -23,4 +23,5 @@ stacks:
     # (fast_server/run_params.py, which also checks their values). Any other
     # override is refused.
     env_overrides: [IMU_PLC_TRIGGER, IMU_SAMPLE_HZ, IMU_PLC_MAX_RUN_S,
-                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH]
+                    IMU_PLC_PATH, CAMERA_PLC_TRIGGER, CAMERA_PLC_PATH,
+                    CAMERA_EDGE_SAVE_FRAMES, CAMERA_EDGE_SAVE_ANNOTATED]

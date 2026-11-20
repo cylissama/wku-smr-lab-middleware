@@ -26,6 +26,7 @@ import { getParameters, saveParameters } from "./api/paramsApi";
 const ROBOT_CAMERA_URL = import.meta.env.VITE_ROBOT_CAMERA_URL;
 const DB_GUI_URL = import.meta.env.VITE_DB_GUI_URL;
 const PORTAINER_URL = import.meta.env.VITE_PORTAINER_URL;
+const TWINS_URL = import.meta.env.VITE_TWINS_URL;
 const DEFAULT_SESSION_LABEL_NAME = "Full System";
 
 // Badge text/colors per capture mode (see fast_server/capture.py)
@@ -34,6 +35,8 @@ const CAPTURE_MODE_BADGES = {
     monitor: { label: "Monitoring", className: "border-cyan-300 bg-cyan-50 text-cyan-800", dot: "bg-cyan-500 animate-pulse" },
     record: { label: "Recording", className: "border-green-300 bg-green-50 text-green-800", dot: "bg-green-500 animate-pulse" },
     stopping: { label: "Stopping & flushing data", className: "border-amber-300 bg-amber-50 text-amber-800", dot: "bg-amber-500 animate-pulse" },
+    // monitor with GET /capture's standby: edge kept up after a PLC-stopped session
+    standby: { label: "Edge standby", className: "border-indigo-300 bg-indigo-50 text-indigo-800", dot: "bg-indigo-500" },
 };
 
 // Wall-clock time to the millisecond, e.g. 14:54:21.412
@@ -45,7 +48,7 @@ function formatClock(unixSeconds) {
 // When every selected edge device is healthy, from GET /capture's "edge"
 // (edge_ready_monitor in fast_server/main.py). Healthy = Swarm saw the
 // device's healthcheck pass; the robot isn't an edge device.
-function EdgeReadiness({ mode, busy, edge }) {
+function EdgeReadiness({ mode, busy, edge, standby }) {
     if (mode !== "monitor" && mode !== "record") {
         return null;
     }
@@ -58,6 +61,10 @@ function EdgeReadiness({ mode, busy, edge }) {
 
     if (state === "busy") {
         text = "Deploying edge devices...";
+    } else if (state === "ready" && standby) {
+        className = "border-indigo-300 bg-indigo-50 text-indigo-800";
+        text = `Edge kept running from the last session (Keep edge running): ${total} edge device(s) ` +
+               "waiting for the next PLC Data_Start -- Start Session needs no redeploy";
     } else if (state === "ready") {
         className = "border-green-300 bg-green-50 text-green-800";
         text = total
@@ -85,8 +92,8 @@ function EdgeReadiness({ mode, busy, edge }) {
     );
 }
 
-function CaptureModeBadge({ mode }) {
-    const badge = CAPTURE_MODE_BADGES[mode] ?? CAPTURE_MODE_BADGES.idle;
+function CaptureModeBadge({ mode, standby }) {
+    const badge = CAPTURE_MODE_BADGES[mode === "monitor" && standby ? "standby" : mode] ?? CAPTURE_MODE_BADGES.idle;
 
     return (
         <div className={`flex items-center gap-2 rounded-md border px-3 py-1 text-sm font-medium ${badge.className}`}>
@@ -146,6 +153,7 @@ export default function DataDashboard() {
     // From /capture: a start/stop/redeploy is in progress on the server, and edge readiness
     const [captureBusy, setCaptureBusy] = useState(false);
     const [captureEdge, setCaptureEdge] = useState(null);
+    const [captureStandby, setCaptureStandby] = useState(false);
     // Device keys the backend is currently capturing (null = all), from /capture
     const [captureDevices, setCaptureDevices] = useState(null);
     const [devices, setDevices] = useState([]);
@@ -238,6 +246,7 @@ export default function DataDashboard() {
                 setCaptureDevices(capture.devices ?? null);
                 setCaptureBusy(Boolean(capture.busy));
                 setCaptureEdge(capture.edge ?? null);
+                setCaptureStandby(Boolean(capture.standby));
             } catch (e) {
                 // An unreachable API is already shown by the System Health strip
                 if (!(e instanceof TypeError)) {
@@ -475,6 +484,7 @@ export default function DataDashboard() {
             if (data.success) {
                 setCaptureMode(data.mode);
                 setCaptureDevices(data.devices ?? null);
+                setCaptureStandby(false);
             } else {
                 const message = `Failed to ${starting ? "start" : "stop"} monitoring: ${data.error}`;
                 setDashboardError(message);
@@ -542,7 +552,7 @@ export default function DataDashboard() {
                                                 : "Session Inactive"
                                         }
                                     />
-                                    <CaptureModeBadge mode={captureMode} />
+                                    <CaptureModeBadge mode={captureMode} standby={captureStandby} />
                                     <div className="rounded-md bg-gray-100 px-3 py-1 text-sm text-gray-700">
                                         Most Recent Session:{" "}
                                         {isLatestSessionLoading
@@ -583,14 +593,20 @@ export default function DataDashboard() {
                                     }`}
                                     disabled={!canToggleMonitoring}
                                     onClick={toggleMonitoring}
-                                    title="Run the devices and show live data without storing anything"
+                                    title={
+                                        isMonitoring && captureStandby
+                                            ? "Take down the edge stacks kept running after the last session"
+                                            : "Run the devices and show live data without storing anything"
+                                    }
                                 >
                                     {isMonitorBusy
                                         ? isMonitoring
                                             ? "Stopping..."
                                             : "Starting..."
                                         : isMonitoring
-                                          ? "Stop Monitoring"
+                                          ? captureStandby
+                                              ? "Take Edge Down"
+                                              : "Stop Monitoring"
                                           : "Start Monitoring"}
                                 </button>
 
@@ -652,7 +668,7 @@ export default function DataDashboard() {
                                 </label>
                             </div>
 
-                            <EdgeReadiness mode={captureMode} busy={captureBusy} edge={captureEdge} />
+                            <EdgeReadiness mode={captureMode} busy={captureBusy} edge={captureEdge} standby={captureStandby} />
                         </div>
 
                         <div className="border-t border-gray-200 pt-4">
@@ -682,6 +698,15 @@ export default function DataDashboard() {
                                     disabled={!PORTAINER_URL}
                                 >
                                     Portainer [WIP]
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                                    onClick={() => window.open(TWINS_URL, "_blank")}
+                                    disabled={!TWINS_URL}
+                                >
+                                    Digital Twin
                                 </button>
                             </div>
                         </div>

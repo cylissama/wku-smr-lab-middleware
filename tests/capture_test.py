@@ -39,7 +39,7 @@ class CaptureStateTests(unittest.TestCase):
     def test_record_accepts_and_stores(self):
         state = CaptureState()
         state.set(CaptureMode.RECORD, session_id=7)
-        self.assertTrue(state.accepts("camera", "front"))
+        self.assertTrue(state.accepts("camera", "cam1"))
         self.assertTrue(state.should_store())
 
     def test_stopping_accepts_nothing(self):
@@ -54,7 +54,7 @@ class CaptureStateTests(unittest.TestCase):
         self.assertTrue(state.accepts("imu", "106"))
         self.assertTrue(state.accepts("robot", "main"))
         self.assertFalse(state.accepts("imu", "107"))
-        self.assertFalse(state.accepts("camera", "front"))
+        self.assertFalse(state.accepts("camera", "cam1"))
 
     def test_is_current_only_for_matching_session_while_recording_or_stopping(self):
         state = CaptureState()
@@ -172,7 +172,7 @@ class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
         m.capture.set(CaptureMode.IDLE)
 
         await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
-        await m.handle_camera(None, "camera/front", b"garbage", None, None)
+        await m.handle_camera(None, "camera/cam1", b"garbage", None, None)
 
         self.assertTrue(m.imu_queue.empty())
         self.assertTrue(m.camera_queue.empty())
@@ -182,13 +182,13 @@ class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
         m.capture.set(CaptureMode.RECORD, session_id=42)
 
         await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
-        await m.handle_camera(None, "camera/front", CAMERA_PAYLOAD, None, None)
+        await m.handle_camera(None, "camera/cam1", CAMERA_PAYLOAD, None, None)
 
         [imu] = drain(m.imu_queue)
         [cam] = drain(m.camera_queue)
         self.assertEqual(imu["device_label"], "106")
         self.assertEqual(imu["session_id"], 42)
-        self.assertEqual(cam["device_label"], "front")
+        self.assertEqual(cam["device_label"], "cam1")
         self.assertEqual(cam["session_id"], 42)
 
     async def test_monitor_does_not_queue(self):
@@ -203,7 +203,7 @@ class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
 
         for _ in range(5):
             await m.handle_sensors(None, "imu/106", IMU_PAYLOAD, None, None)
-        await m.handle_camera(None, "camera/front", CAMERA_PAYLOAD, None, None)
+        await m.handle_camera(None, "camera/cam1", CAMERA_PAYLOAD, None, None)
 
         live = [c.args for c in self.mock_broadcast.call_args_list if c.args[2] == "live"]
         self.assertEqual(len(live), 2)   # one per device, not one per message
@@ -211,7 +211,7 @@ class HandlerGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[live] imu/106", live[0][1])
         self.assertIn("accel (0.10, 0.20, 0.30)", live[0][1])
         self.assertIs(live[1][0], m.camera_manager)
-        self.assertIn("[live] camera/front", live[1][1])
+        self.assertIn("[live] camera/cam1", live[1][1])
 
     async def test_record_sends_no_live_samples_but_tracks_activity(self):
         m.capture.set(CaptureMode.RECORD, session_id=42)
@@ -325,6 +325,7 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
         for p in self.patches:
             p.stop()
         m.capture.set(CaptureMode.IDLE)
+        m.edge_standby = False
 
     async def test_start_session_opens_gate_before_deploy(self):
         modes_at_deploy = []
@@ -476,6 +477,45 @@ class SessionCaptureTests(unittest.IsolatedAsyncioTestCase):
         deploy.assert_not_awaited()
         self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 11))
 
+    async def test_start_session_from_edge_standby_skips_redeploy_and_the_wait_hint(self):
+        # Stacks kept up after a PLC-stopped session (KEEP_EDGE_RUNNING)
+        await m.set_capture(CaptureMode.MONITOR, devices={"imu/106"}, standby=True)
+        m.deployed_env = RECORD_ENV
+
+        with patch("fast_server.main.resolve_selection", new_callable=AsyncMock,
+                   return_value=({"imu/106"}, {"edge": ["imu-106"]})), \
+             patch("fast_server.main.deploy_managed_stacks", new_callable=AsyncMock) as deploy:
+            result = await m.start_session("lbl", session_label="Full System", devices=["imu/106"])
+
+        self.assertTrue(result["success"])
+        deploy.assert_not_awaited()
+        self.assertEqual((m.capture.mode, m.capture.session_id), (CaptureMode.RECORD, 11))
+        self.assertFalse(m.edge_standby)
+        hints = [c for c in m.broadcast_message.await_args_list if "Edge ready" in str(c.args[1])]
+        self.assertEqual(hints, [])
+
+    async def test_failed_start_from_edge_standby_stays_in_standby(self):
+        await m.set_capture(CaptureMode.MONITOR, standby=True)
+        self.db.create_session = AsyncMock(side_effect=RuntimeError("db down"))
+
+        result = await m.start_session("lbl", session_label="Full System")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(m.capture.mode, CaptureMode.MONITOR)
+        self.assertTrue(m.edge_standby)
+
+    async def test_listen_stop_takes_edge_standby_down(self):
+        await m.set_capture(CaptureMode.MONITOR, standby=True)
+
+        with patch("fast_server.main.remove_managed_stacks", new_callable=AsyncMock,
+                   return_value={"edge": {"success": True}}) as remove:
+            result = await m.stop_listening()
+
+        self.assertTrue(result["success"])
+        remove.assert_awaited_once()
+        self.assertEqual(m.capture.mode, CaptureMode.IDLE)
+        self.assertFalse(m.edge_standby)
+
     async def test_failed_redeploy_from_monitor_goes_back_to_monitoring(self):
         m.capture.set(CaptureMode.MONITOR, devices={"imu/106"})
 
@@ -528,7 +568,7 @@ EDGE_SERVICES = {"success": True, "services": [
     {"service": "imu-106", "category": "imu", "device_label": "106", "joint": "J1",
      "node": "RPIIMUJ1", "ip": "192.168.1.106"},
     {"service": "imu-107", "category": "imu", "device_label": "107"},
-    {"service": "camera-front", "category": "camera", "device_label": "113"},
+    {"service": "camera-cam1", "category": "camera", "device_label": "113"},
     {"service": "unlabelled", "category": None, "device_label": None},
 ]}
 
@@ -539,7 +579,7 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.calls = []
         self.status = {"success": True, "state": "running", "services": [
             {"name": "edge_imu-106", "state": "running"},
-            {"name": "edge_camera-front", "state": "deploying"},
+            {"name": "edge_camera-cam1", "state": "deploying"},
         ]}
 
         async def fake_request(method, path, body=None):
@@ -705,7 +745,7 @@ class DeviceSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"])
         self.assertEqual(self.db.create_session.await_args.kwargs["devices"], {"camera/113", "robot/main"})
         self.assertEqual(m.capture.devices, {"camera/113", "robot/main"})
-        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["camera-front"], "env": RECORD_ENV})])
+        self.assertEqual(self.posts(), [("/stacks/edge/deploy", {"services": ["camera-cam1"], "env": RECORD_ENV})])
 
     async def test_start_session_bad_selection_creates_no_session(self):
         result = await m.start_session("lbl", session_label="Full System", devices=["imu/999"])
