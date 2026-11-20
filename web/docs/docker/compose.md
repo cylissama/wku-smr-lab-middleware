@@ -53,7 +53,7 @@ A third volume, `fastapi_state:/state`, is a normal local volume. It holds `run_
 
 ### `web`
 
-Built with a large set of build **args**, because Vite bakes environment values into the static bundle at build time rather than reading them at runtime: `HOST_IP`, `FASTAPI_PORT`, `VITE_API_URL`, `VITE_WS_URL`, `VITE_AI_URL`, `VITE_TWINS_URL`, `VITE_ROBOT_CAMERA_URL`, `VITE_DB_GUI_URL`, `VITE_PORTAINER_URL` (and the non-`VITE_` `ROBOT_CAMERA_URL`, `DB_GUI_URL`, `PORTAINER_URL` fallbacks). This means **the frontend must be rebuilt** any time one of these values changes — see the "SOP: Mockup to Production Cutover" document in the dashboard's Info library for the full list of environment-driven service links.
+Built with a large set of build **args**, because Vite bakes environment values into the static bundle at build time rather than reading them at runtime: `HOST_IP`, `FASTAPI_PORT`, `VITE_API_URL`, `VITE_WS_URL`, `VITE_AI_URL`, `VITE_TWINS_URL`, `VITE_ROBOT_CAMERA_URL`, `VITE_DB_GUI_URL`, `VITE_PORTAINER_URL` (and the non-`VITE_` `ROBOT_CAMERA_URL`, `DB_GUI_URL`, `PORTAINER_URL` fallbacks, plus `DIGITAL_TWIN_IP`/`DIGITAL_TWIN_PORT`, which build the Digital Twin button's URL when `VITE_TWINS_URL` is blank). This means **the frontend must be rebuilt** any time one of these values changes — see the "SOP: Mockup to Production Cutover" document in the dashboard's Info library for the full list of environment-driven service links.
 
 nginx inside this container (`web/nginx.conf`) does four things:
 

@@ -33,7 +33,9 @@ export default defineConfig(({ mode }) => {
   const apiUrl = env.VITE_API_URL || formatUrl("http", hostIp, fastapiPort);
   const wsUrl = env.VITE_WS_URL || toWebSocketUrl(apiUrl);
   const aiUrl = env.VITE_AI_URL || formatUrl("http", hostIp, "3000");
-  const twinsUrl = env.VITE_TWINS_URL || formatUrl("http", hostIp, "8001");
+  // Digital twin: its own machine (DIGITAL_TWIN_IP[:DIGITAL_TWIN_PORT]); blank hides the buttons
+  const twinsUrl =
+    env.VITE_TWINS_URL || formatUrl("http", env.DIGITAL_TWIN_IP, env.DIGITAL_TWIN_PORT);
 
   return {
     plugins: [react(), tailwindcss()],

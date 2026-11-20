@@ -26,6 +26,7 @@ import { getParameters, saveParameters } from "./api/paramsApi";
 const ROBOT_CAMERA_URL = import.meta.env.VITE_ROBOT_CAMERA_URL;
 const DB_GUI_URL = import.meta.env.VITE_DB_GUI_URL;
 const PORTAINER_URL = import.meta.env.VITE_PORTAINER_URL;
+const TWINS_URL = import.meta.env.VITE_TWINS_URL;
 const DEFAULT_SESSION_LABEL_NAME = "Full System";
 
 // Badge text/colors per capture mode (see fast_server/capture.py)
@@ -697,6 +698,15 @@ export default function DataDashboard() {
                                     disabled={!PORTAINER_URL}
                                 >
                                     Portainer [WIP]
+                                </button>
+
+                                <button
+                                    type="button"
+                                    className="rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+                                    onClick={() => window.open(TWINS_URL, "_blank")}
+                                    disabled={!TWINS_URL}
+                                >
+                                    Digital Twin
                                 </button>
                             </div>
                         </div>
